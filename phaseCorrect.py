@@ -143,9 +143,7 @@ def phase(_, alldata, ref_file):
     holdd['x'] = alld['x']
     temp['x'] = alld['x']
     numpyref = ref_signal.to_numpy()
-    stop = np.where(temp['x'].to_numpy < 50e-6)
-
-    Parallel(n_jobs=4)(delayed(loop)(col) for col in cols) 
+    stop = np.where(temp['x'].to_numpy() < 50e-6)
 
     def loop(col):
         try:
@@ -158,6 +156,8 @@ def phase(_, alldata, ref_file):
             temp[col] = sig
         except TypeError:  # sometimes there is a nan column
             pass
+
+    Parallel(n_jobs=4)(delayed(loop)(col) for col in cols) 
 
     alld = pd.DataFrame(temp)
     holdd = pd.DataFrame(holdd)
@@ -188,10 +188,10 @@ def phase(_, alldata, ref_file):
     }), (Output("phase", "disabled"), True, False),
              (Output("process", "style"), {
                  'background-color': 'lightgray',
-                 'margin': '0px 0px 0px 0px'
+                 'margin': '0px 10px 0px 10px'
              }, {
                  'background-color': 'orange',
-                 'margin': '0px 0px 0px 0px'
+                 'margin': '0px 10px 0px 10px'
              })],
     progress=[Output("progress_bar", "value"),
               Output("progress_bar", "max")],
