@@ -121,11 +121,13 @@ def phase(_, alldata, ref_file):
     cols = [ii for ii in alld.columns if ii != 'x']
     holdd['x'] = alld['x']
     temp['x'] = alld['x']
+    numpyref = ref_signal.to_numpy()
+    stop = np.where(temp['x'].to_numpy < 50e-6)
     for col in cols:
         # sig = alld[col].apply(lambda x : x['real'] + 1j * x['imag'])
         try:
             sig = np.array([ii['real'] + 1j * ii['imag'] for ii in list(alld[col])])
-            sig = cycle(ref_signal.to_numpy(), sig)
+            sig = cycle(numpyref, sig, 0, stop)
             holdd[col] = np.real(sig)
             temp[col] = sig
         except TypeError: # sometimes there is a nan column
