@@ -44,6 +44,7 @@ margin = dict(l=20, r=20, t=20, b=20)
 
 five_cycles = 5 / (70E6)  # s
 
+
 def is_int(val):
     try:
         int(val)
@@ -124,53 +125,67 @@ def parse_contents(n, filepath, d):
                          style={'color': 'red'})
         else:
             h = html.Div('File does not exist', style={'color': 'red'})
-    except FileExistsError:
+    except (FileExistsError, FileNotFoundError):
         # except TypeError:
         h = html.Div('File does not exist', style={'color': 'red'})
     except OSError:
         # except TypeError:
         h = html.Div('Filename too long', style={'color': 'red'})
 
+    if 'r' not in locals():
+        r = -1
+
     fig = make_fig()
 
-    return h, fig, d, 0
+    return h, fig, d, r+1
 
 
 @app.callback(Output('dummy', 'children'), Input('save', 'n_clicks'),
-              State('average', 'data'), State('filepath', 'value'))
+              State('average', 'data'), State('filepath', 'value'), prevent_initial_call=True)
 def save(_, avg, filepath):
     try:
         avg = pd.read_json(avg, orient='split')
         avg.to_csv(
             P(filepath).parent.joinpath(
-            "avg_" + "_".join(P(filepath).stem.split("_")[:-1]) +
-            P(filepath).suffix)
-                )
+                "avg_" + "_".join(P(filepath).stem.split("_")[:-1]) +
+                P(filepath).suffix)
+        )
     except ValueError:
         pass
 
     return ""
 
 
-@app.long_callback(Output('phased', 'figure'),
+# @app.long_callback(Output('phased', 'figure'),
+#                    Output('Qs', 'figure'),
+#                    Output('average', 'data'),
+#                    # Output('phase_clicks', 'data'),
+#                    Input('phase', 'n_clicks'),
+#                    Input('Q-factor', 'value'),
+#                    State('alldata', 'data'),
+#                    State('ref-file', 'data'),
+#                    running=[
+#                        (Output("phase", "disabled"), True, False),
+#                        (Output("phase", "style"), {
+#                            'background-color': 'lightgray',
+#                            'margin': '0px 0px 0px 0px'
+#                        }, {
+#                            'background-color': 'yellow',
+#                            'margin': '0px 0px 0px 0px'
+#                        }),
+# ],
+@app.callback(Output('phased', 'figure'),
                    Output('Qs', 'figure'),
                    Output('average', 'data'),
-                   Output('phase', 'n_clicks'),
+                   # Output('phase_clicks', 'data'),
                    Input('phase', 'n_clicks'),
                    Input('Q-factor', 'value'),
                    State('alldata', 'data'),
                    State('ref-file', 'data'),
-                   running=[
-                       (Output("phase", "style"), {
-                           'background-color': 'lightgray',
-                           'margin': '0px 0px 0px 0px'
-                       }, {
-                           'background-color': 'yellow',
-                           'margin': '0px 0px 0px 0px'
-                       }),
-                   ],
-                   prevent_initial_call=True)
+    prevent_initial_call=True)
 def phase(n_clicks, qfact, alldata, ref_file):
+    # if not phase_clicks:
+    #     phase_clicks = -1
     try:
         if n_clicks is not None and n_clicks > 0:
             alld = pd.read_json(alldata, orient='split')
@@ -178,7 +193,8 @@ def phase(n_clicks, qfact, alldata, ref_file):
             holdd = {}
             temp = {}
             refdat = pd.read_json(ref_file, orient='split')
-            ref_signal = refdat[refdat.columns[1]] + 1j * refdat[refdat.columns[2]]
+            ref_signal = refdat[refdat.columns[1]] + \
+                1j * refdat[refdat.columns[2]]
 
             temp['time'] = alld['time']
             start = 0
@@ -196,31 +212,31 @@ def phase(n_clicks, qfact, alldata, ref_file):
             reft = numpyref[start:stop]
 
             for col in cols:
-                try:
-                    sig = np.array(
-                        [ii['real'] + 1j * ii['imag'] for ii in list(alld[col])])
-                    sigt = sig[start:stop]
-                    phi = np.angle(np.dot(np.conjugate(sigt), reft))
-                    sig *= np.exp(1j * phi)
-                    sigo = sig[start:stop]
-                    Q = np.sum(np.abs(sigo - reft)) / np.sum(np.abs(reft)) * 100
+                # try:
+                sig = np.array(
+                    [ii['real'] + 1j * ii['imag'] for ii in list(alld[col])])
+                sigt = sig[start:stop]
+                phi = np.angle(np.dot(np.conjugate(sigt), reft))
+                sig *= np.exp(1j * phi)
+                sigo = sig[start:stop]
+                Q = np.sum(np.abs(sigo - reft)) / \
+                    np.sum(np.abs(reft)) * 100
 
-                    if Q < qfact:
-                        Qs.append(Q)
-                        temp[col] = sig
-                        holdd[col] = np.real(sigo)
-                    else:
-                        XQs.append(Q)
-                # return holdd, temp
-                except TypeError:  # sometimes there is a nan column
-                    # except FileExistsError:
-                    pass
+                if Q < qfact:
+                    Qs.append(Q)
+                    temp[col] = sig
+                    holdd[col] = np.real(sigo)
+                else:
+                    XQs.append(Q)
+
+                # except TypeError:  # sometimes there is a nan column
+                    # pass
 
             # holdd, temp = Parallel(n_jobs=4)(delayed(loop)(col) for col in cols)
 
             alld = pd.DataFrame(temp)
             holdd = pd.DataFrame(holdd)
-            holdd['avg'] = holdd.mean(axis=1)
+            holdd['avg'] = holdd.loc[:, holdd.columns!='time'].mean(axis=1)
             holdd['ref'] = refdat[refdat.columns[1]]
             plots = [ii for ii in list(holdd.columns) if is_int(ii)]
             plots = plots[::max(len(plots) // 5, 1)] + ['avg', 'ref']
@@ -238,12 +254,12 @@ def phase(n_clicks, qfact, alldata, ref_file):
             raise PreventUpdate
         # qfig.update_xaxes(range=[0, 10])
     except PreventUpdate:
-            return dash.no_update, dash.no_update, dash.no_update, 0
+        return dash.no_update, dash.no_update, dash.no_update,
 
-    except (FileExistsError):
-        fig = px.line()
-        qfig = px.histogram()
-        alld = pd.DataFrame()
+    # except (FileExistsError):
+    #     fig = px.line()
+    #     qfig = px.histogram()
+    #     alld = pd.DataFrame()
 
     savedat = {
         'time': alld['time'],
@@ -253,15 +269,17 @@ def phase(n_clicks, qfact, alldata, ref_file):
     qfig.update_layout(margin=margin)
     qfig.update_xaxes(title_text='phase quality Q')
 
-    return fig, qfig, pd.DataFrame(savedat).to_json(date_format='iso', orient='split'
-                                                    ), 0
+
+    return fig, qfig, pd.DataFrame(savedat).to_json(
+            date_format='iso', orient='split'
+                                                    ),
     # return fig, qfig, #savedat
 
 
 @app.long_callback(
     Output('allplots', 'figure'),
     Output('alldata', 'data'),
-    Output('process', 'n_clicks'),
+    # Output('process', 'n_clicks'),
     Input('process', 'n_clicks'),
     # Input('filepath', 'value'),
     State('filepath', 'value'),
@@ -273,14 +291,14 @@ def phase(n_clicks, qfact, alldata, ref_file):
     }, {
         'visibility': 'hidden',
         'margin': '0px 20px 0px 20px'
-    }), (Output("phase", "disabled"), True, False),
-             (Output("process", "style"), {
-                 'background-color': 'lightgray',
-                 'margin': '0px 10px 0px 10px'
-             }, {
-                 'background-color': 'orange',
-                 'margin': '0px 10px 0px 10px'
-             })],
+    }), 
+        (Output("process", "style"), {
+            'background-color': 'lightgray',
+            'margin': '0px 10px 0px 10px'
+        }, {
+            'background-color': 'orange',
+            'margin': '0px 10px 0px 10px'
+        })],
     progress=[Output("progress_bar", "value"),
               Output("progress_bar", "max")],
     prevent_initial_call=True)
@@ -289,10 +307,12 @@ def process(set_progress, n_clicks, filepath, ref_file, skiprows):
         if n_clicks is not None and n_clicks > 0:
             files = [
                 ii for ii in P(filepath).parent.iterdir()
+
                 if "_".join(P(filepath).stem.split("_")[:-1]) == "_".join(ii.stem.split("_")[:-1])
                 and ii.suffix == P(filepath).suffix
             ]
-            # files = files[:300]
+            files.sort()
+            # files = files[:3]
             # alld = pd.DataFrame(columns=['time', *list(range(1,len(files)))])
             # holdd = pd.DataFrame(columns=['time', *list(range(1,len(files)))])
             alld = {}
@@ -310,7 +330,7 @@ def process(set_progress, n_clicks, filepath, ref_file, skiprows):
                                 skiprows=skiprows,
                                 sep=', ',
                                 on_bad_lines='skip',
-                                engine='python', 
+                                engine='python',
                                 )
                 alld[i] = d[d.columns[1]] + 1j * d[d.columns[2]]
                 holdd[i] = d[d.columns[1]][start:stop]
@@ -323,15 +343,16 @@ def process(set_progress, n_clicks, filepath, ref_file, skiprows):
                           y=holdd.columns[1::max(len(holdd.columns) // 5, 1)])
             fig.update_layout(margin=margin)
         # except IndexError:
-        else:    
+        else:
             raise PreventUpdate
     except (FileExistsError, ValueError):
         fig = make_fig()
         alld = pd.DataFrame()
     except PreventUpdate:
-        return dash.no_update, dash.no_update, 0
+        return dash.no_update, dash.no_update,
 
-    return fig, alld.to_json(date_format='iso', orient='split'), 0
+    return fig, alld.to_json(date_format='iso', orient='split'),
+
 
 app.layout = html.Div(
     [
@@ -459,10 +480,11 @@ app.layout = html.Div(
         dcc.Store(id='skiprows'),
         dcc.Store(id='alldata'),
         dcc.Store(id='average'),
+        # dcc.Store(id='phase_clicks'),
         html.Div(id='progress'),
         # dcc.Interval(id='interval', interval=500)
     ],
     style={})
 
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=True, threaded=True, port=1027)
