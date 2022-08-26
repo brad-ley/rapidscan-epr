@@ -17,7 +17,7 @@ from plotly import graph_objects as go
 from plotly.offline import iplot
 from scipy.optimize import curve_fit as cf
 
-from cycler import cycle
+from cycle import cycle
 
 cache = diskcache.Cache("./cache")
 long_callback_manager = DiskcacheLongCallbackManager(cache)
@@ -302,6 +302,16 @@ def phase(n_clicks, qfact, alldata, ref_file):
     progress=[Output("progress_bar", "value"),
               Output("progress_bar", "max")],
     prevent_initial_call=True)
+# @app.callback(
+#     Output('allplots', 'figure'),
+#     Output('alldata', 'data'),
+#     # Output('process', 'n_clicks'),
+#     Input('process', 'n_clicks'),
+#     # Input('filepath', 'value'),
+#     State('filepath', 'value'),
+#     State('ref-file', 'data'),
+#     State('skiprows', 'data'),
+#     prevent_initial_call=True)
 def process(set_progress, n_clicks, filepath, ref_file, skiprows):
     try:
         if n_clicks is not None and n_clicks > 0:
@@ -312,7 +322,7 @@ def process(set_progress, n_clicks, filepath, ref_file, skiprows):
                 and ii.suffix == P(filepath).suffix
             ]
             files.sort()
-            # files = files[:3]
+            files = files[:500]
             # alld = pd.DataFrame(columns=['time', *list(range(1,len(files)))])
             # holdd = pd.DataFrame(columns=['time', *list(range(1,len(files)))])
             alld = {}

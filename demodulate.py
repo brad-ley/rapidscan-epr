@@ -19,8 +19,6 @@ from plotly.offline import iplot
 from scipy.optimize import curve_fit as cf
 from scipy.signal import find_peaks as fp
 
-from cycler import cycle
-
 cache = diskcache.Cache("./cache")
 long_callback_manager = DiskcacheLongCallbackManager(cache)
 external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
@@ -72,12 +70,13 @@ fig = make_fig()
     Output('old_clicks', 'data'),
     Output('dfreq', 'value'),
     Input('dfreq', 'value'),
+    Input('dphase', 'value'),
     Input('raw-data', 'data'),
     Input('best', 'n_clicks'),
     State('old_clicks', 'data'),
     prevent_initial_call=True
 )
-def demod(freq, raw, n_clicks, old_clicks):
+def demod(freq, phase, raw, n_clicks, old_clicks):
     if not old_clicks:
         old_clicks = 0
     try:
@@ -96,9 +95,8 @@ def demod(freq, raw, n_clicks, old_clicks):
             freq *= 1E-6
 
         # def sin(x, B, c, phi):
-        print("===========")
-
         dat *= np.exp(1j * 2 * np.pi * freq * 1E6 * t)
+        dat *= np.exp(1j * phase * np.pi / 180)
         datad = pd.DataFrame(dict(time=t, demod=dat))
         outdat = dict(time=t, real=np.real(dat), imag=np.imag(dat), mag=np.abs(dat))
 
@@ -232,12 +230,12 @@ app.layout = html.Div(
             html.Div(
                 [
                     dcc.Slider(
-                        69.9,
-                        70.1,
-                        # 65,
-                        # 75,
+                        # 70.04,
+                        # 70.06,
+                        69.5,
+                        70.5,
                         id='dfreq',
-                        value=69.934,
+                        value=70,
                         marks=None,
                         tooltip={
                             "placement": "right",
@@ -258,7 +256,35 @@ app.layout = html.Div(
                             'background-color': '#BF00FF',
                             'margin': '0px 0px 0px 0px'
                         }),
-        ]),
+            html.Div([
+                "Phase (deg)",
+            ], style={
+                'display': 'inline-block',
+                'margin': '0px 0px 0px 30px'
+            },),
+            html.Div(
+                [
+                    dcc.Slider(
+                        0,
+                        180,
+                        # 65,
+                        # 75,
+                        id='dphase',
+                        value=0,
+                        marks=None,
+                        tooltip={
+                            "placement": "right",
+                            "always_visible": True
+                        },
+                    )
+                ],
+                style={
+                    'width': '14%',
+                    'display': 'inline-block',
+                    'margin': '0px 0px -25px 0px'
+                },
+            ),
+            ]),
         html.Div(
             [
                 "Path: ",
