@@ -232,8 +232,8 @@ app.layout = html.Div(
                     dcc.Slider(
                         # 70.04,
                         # 70.06,
-                        69.5,
-                        70.5,
+                        69.9,
+                        70.1,
                         id='dfreq',
                         value=70,
                         marks=None,

@@ -27,13 +27,12 @@ plt.rcParams['ytick.minor.size'] = 2
 plt.rcParams['ytick.minor.width'] = 1
 
 
-FILENAME = '/Users/Brad/Downloads/Second try (short acq)/demod_M01.dat' 
 lw = 2
 
 def lorentzian(x, A, x0, b):
     return A/np.pi * b/2/ ((x-x0)**2 + (b/2) ** 2)
 
-def plot(filename, amplitude, frequency, fit=True):
+def plot(filename, amplitude, frequency, coil, choice='real', Bphase=np.pi, fit=True):
     """plot.
 
     :param filename:
@@ -46,13 +45,13 @@ def plot(filename, amplitude, frequency, fit=True):
     dat = np.array([ii['real']+1j*ii['imag'] for ii in l])
     fig, ax = plt.subplots(nrows=2, figsize=(8,6))
    
-    choice = 'real'
-    coil = 0.3 # Coil calibration value
     fieldlim = 30 # Gauss
-    current = amplitude * np.sin(2 * np.pi * frequency * t + np.pi)
+    current = amplitude * np.sin(2 * np.pi * frequency * t + Bphase)
     field = coil * current * 1e3 # Gauss
-    tempB = field[np.argmin(field):np.argmax(field)]
-    tempdat = dat[np.argmin(field):np.argmax(field)] 
+    l = min(np.argmin(field), np.argmax(field))
+    h = max(np.argmin(field), np.argmax(field))
+    tempB = field[l:h]
+    tempdat = dat[l:h] 
     plotB = tempB[np.abs(tempB) < fieldlim]
     plotdat = tempdat[np.abs(tempB) < fieldlim]
 
@@ -60,6 +59,7 @@ def plot(filename, amplitude, frequency, fit=True):
 
     ax[0].axvline(t[np.where(field == plotB[0])][0], c='k', alpha=0.5, lw=lw)
     ax[0].axvline(t[np.where(field == plotB[-1])][0], c='k', alpha=0.5, lw=lw)
+
     axl = ax[0].twinx()
     axl.plot(t, np.real(dat), lw=lw, c='k', label='Real')
     axl.plot(t, np.imag(dat), lw=lw, c='r', label='Imag')
@@ -96,5 +96,6 @@ def plot(filename, amplitude, frequency, fit=True):
 
 
 if __name__ == "__main__":
-    plot(FILENAME, 150e-3, 70e3, fit=False)
+    FILENAME = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/8/25/Second try (short acq)/demod_M01.dat' 
+    plot(FILENAME, 150e-3, 70e3, 0.29, choice='real', Bphase=-np.pi, fit=False)
     plt.show()

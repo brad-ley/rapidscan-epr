@@ -109,7 +109,7 @@ def parse_contents(n, filepath, d):
                                     1 / np.max(d[d.columns[0]]), 0
                                 ])
                 d['sinfit'] = sin(d[d.columns[0]], *popt)
-            except IndexError:
+            except (IndexError, RuntimeError):
                 pass
             fig = px.line(d, x=d.columns[0], y=d.columns)
             fig.update_layout(margin=margin)
