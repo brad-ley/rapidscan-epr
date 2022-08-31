@@ -50,7 +50,7 @@ def fit(t, r, fitB1=False):
     r -= np.mean(r)
     r /= np.max(np.abs(r))
 
-    fitlim = 25
+    fitlim = 20
     midt = t[np.abs(field[l:h]) < fitlim]
     midB = field[l:h][np.abs(field[l:h]) < fitlim]
     midr = r[np.abs(field[l:h]) < fitlim]
@@ -64,7 +64,7 @@ def fit(t, r, fitB1=False):
             t, sol, omega = Fp(t, T2, dB, amp, B1, phase)
             out = np.real(sol.y[0] + 1j * sol.y[1])
             return out / np.max(out)
-        popt, pcov = cf(F, midt, midr, p0=[3e-7, B/10, B, 0.14, 0], )
+        popt, pcov = cf(F, midt, midr, p0=[190e-9, B/10, B, 0.14, 2], )
     else:
         def Fp(t, T2, dB, amp, phase):
             t, sol, omega = Bloch(1e-3, T2, dB, 70e3, amp, t=t, phase=phase)
@@ -73,14 +73,15 @@ def fit(t, r, fitB1=False):
             t, sol, omega = Fp(t, T2, dB, amp, phase)
             out = np.real(sol.y[0] + 1j * sol.y[1])
             return out / np.max(out)
-        popt, pcov = cf(F, midt, midr, p0=[3e-7, B/10, B, 0], )
+        # popt, pcov = cf(F, midt, midr, p0=[3e-7, B/10, B, 0], )
+        popt, pcov = cf(F, midt, midr, p0=[190e-9, B/10, B, 2], )
 
     fig, ax = plt.subplots(figsize=(8,6))
     _, sol, omega = Fp(midt, *popt)
     out = np.real(sol.y[0] + 1j * sol.y[1])
     out /= np.max(out)
     # ax.set_title(rf'Fit: $T_2$= {popt[0]:.1e} s, $B_m=$ {int(popt[2])} G, $\Delta_B=$ {popt[1]:.2f} G, $B_1=$ {popt[3]:.2f} G')
-    ax.set_title(rf'Fit: $T_2$= {int(popt[0]*1e9)} s, $B_m=$ {int(popt[2])} G, $\Delta_B=$ {popt[1]:.2f} G')
+    ax.set_title(rf'Fit: $T_2$= {int(popt[0]*1e9)} s, $B_m=$ {int(popt[2])} G, $\Delta_B=$ {popt[1]:.2f} G, $\phi=$ {popt[3]:.2f} rad')
     ax.set_yticklabels([])
     ax.set_ylabel('Signal (arb. u)')
     axr = ax.twinx()
@@ -96,7 +97,7 @@ def fit(t, r, fitB1=False):
     out = np.real(sol.y[0] + 1j * sol.y[1])
     out /= np.max(out)
     # ax.set_title(rf'Fit: $T_2$= {popt[0]:.1e} s, $B_m=$ {int(popt[2])} G, $\Delta_B=$ {popt[1]:.2f} G, $B_1=$ {popt[3]:.2f} G')
-    ax.set_title(rf'Fit: $T_2$= {int(popt[0]*1e9)} s, $B_m=$ {int(popt[2])} G, $\Delta_B=$ {popt[1]:.2f} G')
+    ax.set_title(rf'Fit: $T_2$= {int(popt[0]*1e9)} s, $B_m=$ {int(popt[2])} G, $\Delta_B=$ {popt[1]:.2f} G, $\phi=$ {popt[3]:.2f} rad')
     ax.set_yticklabels([])
     ax.set_ylabel('Signal (arb. u)')
     axr = ax.twinx()
@@ -113,6 +114,6 @@ if __name__ == "__main__":
     t = d['time'].to_numpy()
     l = [ast.literal_eval(ii) for ii in d['demod'].to_list()]
     dat = np.array([ii['real'] + 1j * ii['imag'] for ii in l])
-    r = np.real(dat)
+    r = np.abs(dat)
     fit(t, r)
     plt.show()
