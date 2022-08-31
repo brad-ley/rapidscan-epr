@@ -69,6 +69,8 @@ fig = make_fig()
     Output('demod-data', 'data'),
     Output('old_clicks', 'data'),
     Output('dfreq', 'value'),
+    Output('dfreq', 'min'),
+    Output('dfreq', 'max'),
     Input('dfreq', 'value'),
     Input('dphase', 'value'),
     Input('raw-data', 'data'),
@@ -91,11 +93,18 @@ def demod(freq, phase, raw, n_clicks, old_clicks):
             fft = np.abs(np.fft.fftshift(np.fft.fft(paddat)))
             pk = fp(fft, height=0.5 * np.max(fft))
             f = np.fft.fftshift(np.fft.fftfreq(paddat.shape[0], t[1] - t[0]))
-            freq = np.abs(f[pk[0][0]])
+            freq = 1*np.abs(f[pk[0][0]])
             freq *= 1E-6
 
         # def sin(x, B, c, phi):
-        dat *= np.exp(1j * 2 * np.pi * freq * 1E6 * t)
+        ls = [1, -1]
+        o = []
+        for i, l in enumerate(ls):
+            o.append(np.std(dat * np.exp(l * 1j * 2 * np.pi * freq * 1E6 * t)))  
+
+        v = ls[np.argmin(o)] # find whether we need pos or neg freq
+            
+        dat *= np.exp(v * 1j * 2 * np.pi * freq * 1E6 * t)
         dat *= np.exp(1j * phase * np.pi / 180)
         datad = pd.DataFrame(dict(time=t, demod=dat))
         outdat = dict(time=t, real=np.real(dat), imag=np.imag(dat), mag=np.abs(dat))
@@ -103,16 +112,21 @@ def demod(freq, phase, raw, n_clicks, old_clicks):
     except (FileNotFoundError, ValueError):
         print('error')
 
-        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
     fig = px.line(outdat, x='time', y=['real', 'imag', 'mag'])
     # fig = px.line(fitd, x='time', y='fit')
     fig.update_layout(margin=margin)
     # fig.update_xaxes(range=[0, 1e-6])
 
+    if n_clicks > old_clicks:
+        return fig, datad.to_json(
+            date_format='iso', orient='split'
+        ), n_clicks, freq, 0.999*freq, 1.001*freq
+
     return fig, datad.to_json(
         date_format='iso', orient='split'
-    ), n_clicks, freq
+    ), n_clicks, freq, dash.no_update, dash.no_update
 
 
 @app.callback(
@@ -125,29 +139,49 @@ def demod(freq, phase, raw, n_clicks, old_clicks):
     State('ref-file', 'data'),
     prevent_initial_call=False)
 def parse_contents(n, filepath, d):
+
     try:
         if P(filepath).suffix in ['.csv', '.dat', '.txt']:
             lines = [
                 ii.strip('\r') for ii in P(filepath).read_text().split('\n')
             ]
-            d = pd.read_csv(P(filepath),
-                            # skiprows=1,
-                            sep=',',
-                            on_bad_lines='skip',
-                            engine='python',)
+            try:
+                r = lines.index('[Data]')
+            except ValueError:
+                r = lines.index('')
 
-            def sin(x, a, b, c, d):
-                return a + b * np.sin(c * x + d)
+            try:
+                d = pd.read_csv(P(filepath),
+                                skiprows=r + 1,
+                                sep=', ',
+                                on_bad_lines='skip',
+                                engine='python',)
+                dt = float("".join([ii for ii in lines
+                                    if 'delta t' in ii]).split(', ')[1])
+                x = np.linspace(0,
+                                len(d[d.columns[0]]) * dt,
+                                len(d[d.columns[0]]))
+                d[d.columns[0]] = x
+                # d['avg'] = 
+                d = d.rename(columns={"Y[0]":"real", "Y[1]":"imag", "Y[2]":"sin"})
 
-            d['avg'] = [ast.literal_eval(ii) for ii in list(d['avg'])]
-            d['real'] = np.array(
-                [ii['real'] for ii in d['avg']])
-            d['imag'] = np.array(
-                [ii['imag'] for ii in d['avg']])
+            except:
+                d = pd.read_csv(P(filepath),
+                                # skiprows=1,
+                                sep=',',
+                                on_bad_lines='skip',
+                                engine='python',)
+
+                d['avg'] = [ast.literal_eval(ii) for ii in list(d['avg'])]
+                d['real'] = np.array(
+                    [ii['real'] for ii in d['avg']])
+                d['imag'] = np.array(
+                    [ii['imag'] for ii in d['avg']])
 
             fig = px.line(d, x='time', y=['real', 'imag'])
+
             fig.update_layout(margin=margin)
-            # fig.update_xaxes(range=[0, 1e-6])
+                # fig.update_xaxes(range=[0, 1e-6])
 
             return html.Div(f"Loaded {P(filepath).name}",
                             style={'color': 'green'
@@ -230,10 +264,11 @@ app.layout = html.Div(
             html.Div(
                 [
                     dcc.Slider(
+                        # # 70.02,
                         # 70.04,
-                        # 70.06,
-                        69.9,
-                        70.1,
+                        69,
+                        # 65,
+                        71,
                         id='dfreq',
                         value=70,
                         marks=None,
