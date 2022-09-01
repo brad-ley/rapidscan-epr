@@ -37,7 +37,8 @@ def fit(t, r, fitB1=False):
     """
     r = r / np.max(np.abs(r))
     f = 70e3
-    B = 45 # initial guess for B
+    B = 0.1325/2 * 150 # initial guess for B
+    fitlim = B / 2
     sin = np.sin(2 * np.pi * f * t + np.pi) # usually start at zero crossing of down sweep
     field = B * sin 
     l = min(np.argmin(field), np.argmax(field))
@@ -50,7 +51,6 @@ def fit(t, r, fitB1=False):
     r -= np.mean(r)
     r /= np.max(np.abs(r))
 
-    fitlim = 20
     midt = t[np.abs(field[l:h]) < fitlim]
     midB = field[l:h][np.abs(field[l:h]) < fitlim]
     midr = r[np.abs(field[l:h]) < fitlim]
@@ -63,8 +63,8 @@ def fit(t, r, fitB1=False):
         def F(t, T2, dB, amp, B1, phase):
             t, sol, omega = Fp(t, T2, dB, amp, B1, phase)
             out = np.real(sol.y[0] + 1j * sol.y[1])
-            return out / np.max(out)
-        popt, pcov = cf(F, midt, midr, p0=[190e-9, B/10, B, 0.14, 2], )
+            return out / np.max(np.abs(out))
+        popt, pcov = cf(F, midt, midr, p0=[190e-9, B/10, B, 0.14, 0], )
     else:
         def Fp(t, T2, dB, amp, phase):
             t, sol, omega = Bloch(1e-3, T2, dB, 70e3, amp, t=t, phase=phase)
@@ -72,17 +72,18 @@ def fit(t, r, fitB1=False):
         def F(t, T2, dB, amp, phase):
             t, sol, omega = Fp(t, T2, dB, amp, phase)
             out = np.real(sol.y[0] + 1j * sol.y[1])
-            return out / np.max(out)
+            return out / np.max(np.abs(out))
         # popt, pcov = cf(F, midt, midr, p0=[3e-7, B/10, B, 0], )
-        popt, pcov = cf(F, midt, midr, p0=[190e-9, B/10, B, 2], )
+        popt, pcov = cf(F, midt, midr, p0=[175e-9, 1e-1, B, 5/4*np.pi], )
 
     fig, ax = plt.subplots(figsize=(8,6))
     _, sol, omega = Fp(midt, *popt)
+    # _, sol, omega = Fp(midt, 170e-9, 0.16, 9, 3.81)
     out = np.real(sol.y[0] + 1j * sol.y[1])
-    out /= np.max(out)
+    out /= np.max(np.abs(out))
     # ax.set_title(rf'Fit: $T_2$= {popt[0]:.1e} s, $B_m=$ {int(popt[2])} G, $\Delta_B=$ {popt[1]:.2f} G, $B_1=$ {popt[3]:.2f} G')
     ax.set_title(rf'Fit: $T_2$= {int(popt[0]*1e9)} s, $B_m=$ {int(popt[2])} G, $\Delta_B=$ {popt[1]:.2f} G, $\phi=$ {popt[3]:.2f} rad')
-    ax.set_yticklabels([])
+    # ax.set_yticklabels([])
     ax.set_ylabel('Signal (arb. u)')
     axr = ax.twinx()
     axr.set_ylabel('Field (G)', c='b')
@@ -90,12 +91,12 @@ def fit(t, r, fitB1=False):
     axr.plot(midt, omega, c='b', alpha=0.5, ls='--')
     ax.plot(midt, midr, label='Raw', c='k')
     ax.plot(midt, out, label='Fit', c='r', ls=':')
-    plt.savefig(P(FILENAME).parent.joinpath('fitRapidscan.png'), dpi=400)
+    plt.savefig(P(FILENAME).parent.joinpath(P(FILENAME).stem + '_fitRapidscan.png'), dpi=400)
 
     fig, ax = plt.subplots(figsize=(8,6))
     _, sol, omega = Fp(t, *popt)
     out = np.real(sol.y[0] + 1j * sol.y[1])
-    out /= np.max(out)
+    out /= np.max(np.abs(out))
     # ax.set_title(rf'Fit: $T_2$= {popt[0]:.1e} s, $B_m=$ {int(popt[2])} G, $\Delta_B=$ {popt[1]:.2f} G, $B_1=$ {popt[3]:.2f} G')
     ax.set_title(rf'Fit: $T_2$= {int(popt[0]*1e9)} s, $B_m=$ {int(popt[2])} G, $\Delta_B=$ {popt[1]:.2f} G, $\phi=$ {popt[3]:.2f} rad')
     ax.set_yticklabels([])
@@ -109,11 +110,21 @@ def fit(t, r, fitB1=False):
     plt.savefig(P(FILENAME).parent.joinpath('fullRapidscan.png'), dpi=400)
 
 if __name__ == "__main__":
-    FILENAME = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/8/25/Second try (short acq)/demod_M01.dat'
-    d = pd.read_csv(FILENAME)
-    t = d['time'].to_numpy()
-    l = [ast.literal_eval(ii) for ii in d['demod'].to_list()]
-    dat = np.array([ii['real'] + 1j * ii['imag'] for ii in l])
+    FILENAME = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/8/31/M01_150mA_t=3244.999s_realFilterMagnitude.dat'
+    try:
+        d = pd.read_csv(FILENAME)
+        t = d['time'].to_numpy()
+        l = [ast.literal_eval(ii) for ii in d['demod'].to_list()]
+        dat = np.array([ii['real'] + 1j * ii['imag'] for ii in l])
+    except KeyError: # handle files ending in realFilterMagnitude.dat
+        d = pd.read_csv(P(FILENAME),
+                        # skiprows=1,
+                        sep=',',
+                        on_bad_lines='skip',
+                        engine='python',)
+
+        dat = [ast.literal_eval(ii) for ii in d['avg'].to_numpy()]
+
     r = np.abs(dat)
     fit(t, r)
     plt.show()

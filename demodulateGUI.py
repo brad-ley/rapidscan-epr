@@ -165,7 +165,7 @@ def parse_contents(n, filepath, d):
                 # d['avg'] = 
                 d = d.rename(columns={"Y[0]":"real", "Y[1]":"imag", "Y[2]":"sin"})
 
-            except:
+            except KeyError:
                 d = pd.read_csv(P(filepath),
                                 # skiprows=1,
                                 sep=',',
@@ -177,6 +177,22 @@ def parse_contents(n, filepath, d):
                     [ii['real'] for ii in d['avg']])
                 d['imag'] = np.array(
                     [ii['imag'] for ii in d['avg']])
+
+            # except TypeError:
+            except:
+                d = pd.read_csv(P(filepath),
+                                # skiprows=1,
+                                sep=',',
+                                on_bad_lines='skip',
+                                engine='python',)
+
+                d['avg'] = [ast.literal_eval(ii) for ii in list(d['avg'].to_numpy())]
+                d['real'] = np.real(d['avg'])
+                d['imag'] = np.imag(d['avg'])
+
+            # print(d.real)
+            # print("++++++")
+            # print(d.imag)
 
             fig = px.line(d, x='time', y=['real', 'imag'])
 
@@ -197,9 +213,9 @@ def parse_contents(n, filepath, d):
     except FileExistsError:
         # except TypeError:
         h = html.Div('File does not exist', style={'color': 'red'})
-    except OSError:
-        # except TypeError:
-        h = html.Div('Filename too long', style={'color': 'red'})
+    # except OSError:
+    #     # except TypeError:
+    #     h = html.Div('Filename too long', style={'color': 'red'})
     except KeyError:
         h = html.Div('Not averaged file', style={'color': 'red'})
 
@@ -286,7 +302,7 @@ app.layout = html.Div(
             ),
             html.Button(id='best',
                         n_clicks=0,
-                        children='Best freq.',
+                        children='Find freq.',
                         style={
                             'background-color': '#BF00FF',
                             'margin': '0px 0px 0px 0px'
