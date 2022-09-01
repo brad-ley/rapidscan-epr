@@ -93,7 +93,9 @@ def filt(filename, highpass=0, savgol_window=0, row=1, maxrow=1):
     sig = real + 1j * imag
     dic = {'time':t, 'avg': sig}
     d = pd.DataFrame(dic)
-    d.to_csv(P(filename).parent.joinpath(P(filename).stem + '_realFilterMagnitude.dat'))
+    if not P(filename).parent.joinpath('filtered').exists():
+        P(filename).parent.joinpath('filtered').mkdir()
+    d.to_csv(P(filename).parent.joinpath('filtered', P(filename).stem + '_realFilterMagnitude.dat'))
 
     plotsig = np.abs(sig)[len(d['time'])//4:-len(d['time'])//4]
     plotsig -= np.mean(plotsig[:len(plotsig)//20])
@@ -105,7 +107,7 @@ def filt(filename, highpass=0, savgol_window=0, row=1, maxrow=1):
     ax.plot(plott, plotsig+row, c=cmap(row/maxrow))
 
 if __name__ == "__main__":
-    filename = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/8/31/M01_150mA_t=3244.999s.dat'
+    filename = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/8/31/sweeping mod field/M01_t=0098.214s.dat'
     files = [ii for ii in P(filename).parent.iterdir() if ii.name.endswith('s.dat')]
     files.sort(key=lambda x: float(''.join([xx for xx in [ii for ii in P(x).stem.split('_') if 't=' in ii][0] if (isdigit(xx) or xx=='.')])))
     times = [float(''.join([ii for ii in [ll for ll in P(bb).stem.split('_') if 't=' in ll][0] if (isdigit(ii) or ii=='.')])) for bb in files]

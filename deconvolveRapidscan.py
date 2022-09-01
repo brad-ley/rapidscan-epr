@@ -47,8 +47,12 @@ def sindrive(Bpp, f, t):
 def deconvolve(filename, coil, amplitude, frequency, Bphase=np.pi):
     d = pd.read_csv(filename)
     t = d['time'].to_numpy()
-    l = [ast.literal_eval(ii) for ii in d['demod'].to_list()]
-    dat = np.array([ii['real']+1j*ii['imag'] for ii in l])
+    try:
+        l = [ast.literal_eval(ii) for ii in d['demod'].to_list()]
+        dat = np.array([ii['real']+1j*ii['imag'] for ii in l])
+    except KeyError:
+        l = np.array([ast.literal_eval(ii) for ii in d['avg'].to_list()])
+        dat = l
 
     # coil = 0.23 # Coil calibration value G/mA
     fieldlim = amplitude * coil # Gauss
@@ -100,7 +104,7 @@ def main(filename, coil, amplitude, frequency, plotfield, Bphase=-1/2*np.pi, Mph
     c = 3
 
     fig, ax = plt.subplots(figsize=(8,6))
-    for i, p in enumerate(np.linspace(0.75*coil, 1.25*coil, 6)):
+    for i, p in enumerate(np.linspace(0.75*coil, 1.25*coil, 7)):
         x, y = deconvolve(filename, p, amplitude, frequency, Bphase=Bphase)
 
         for k, d in enumerate([np.real, np.imag]):
@@ -116,7 +120,7 @@ def main(filename, coil, amplitude, frequency, plotfield, Bphase=-1/2*np.pi, Mph
     fig.savefig(P(filename).parent.joinpath('coils.png'), dpi=400)
 
     fig, ax = plt.subplots(figsize=(8,6))
-    for i, p in enumerate(np.linspace(0, np.pi/2, 5)):
+    for i, p in enumerate(np.linspace(0, np.pi, 7)):
         x, y = deconvolve(filename, coil, amplitude, frequency, Bphase=Bphase)
         y *= np.exp(1j * p)
         for k, d in enumerate([np.real, np.imag]):
@@ -150,12 +154,12 @@ def main(filename, coil, amplitude, frequency, plotfield, Bphase=-1/2*np.pi, Mph
 
 
 if __name__ == "__main__":
-    FILENAME = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/8/25/Second try (short acq)/demod_M01.dat' 
-    coil = 0.29
+    FILENAME = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/8/31/sweeping mod field/filtered/M01_t=0098.214s_realFilterMagnitude.dat' 
+    coil = 0.1325/2
     amplitude = 150 # mA
     frequency = 70e3
     Bphase = -4/4 * np.pi
-    Mphase = 0.4
-    plotfield = 30 # G
+    Mphase = 2.1
+    plotfield = 7 # G
     main(FILENAME, coil, amplitude, frequency, plotfield, Bphase=Bphase, Mphase=Mphase)
     plt.show()

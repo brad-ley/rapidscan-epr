@@ -213,9 +213,9 @@ def parse_contents(n, filepath, d):
     except FileExistsError:
         # except TypeError:
         h = html.Div('File does not exist', style={'color': 'red'})
-    # except OSError:
-    #     # except TypeError:
-    #     h = html.Div('Filename too long', style={'color': 'red'})
+    except OSError:
+        # except TypeError:
+        h = html.Div('Filename too long', style={'color': 'red'})
     except KeyError:
         h = html.Div('Not averaged file', style={'color': 'red'})
 
