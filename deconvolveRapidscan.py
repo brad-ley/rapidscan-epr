@@ -106,6 +106,7 @@ def main(filename, coil, amplitude, frequency, plotfield, Bphase=-1/2*np.pi, Mph
     fig, ax = plt.subplots(figsize=(8,6))
     for i, p in enumerate(np.linspace(0.75*coil, 1.25*coil, 7)):
         x, y = deconvolve(filename, p, amplitude, frequency, Bphase=Bphase)
+        y /= np.max(np.abs(y[np.abs(x) < plotfield]))        
 
         for k, d in enumerate([np.real, np.imag]):
             if k == 0:
@@ -154,12 +155,12 @@ def main(filename, coil, amplitude, frequency, plotfield, Bphase=-1/2*np.pi, Mph
 
 
 if __name__ == "__main__":
-    FILENAME = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/8/31/sweeping mod field/filtered/M01_t=0098.214s_realFilterMagnitude.dat' 
-    coil = 0.1325/2
-    amplitude = 150 # mA
+    FILENAME = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/1/20220901_TEMPO_RS/filtered/159mA_t=8210.172s_realFilterMagnitude.dat'
+    coil = 0.21
+    amplitude = 159 # mA
     frequency = 70e3
     Bphase = -4/4 * np.pi
-    Mphase = 2.1
-    plotfield = 7 # G
+    Mphase = -0.3
+    plotfield = 32 # G
     main(FILENAME, coil, amplitude, frequency, plotfield, Bphase=Bphase, Mphase=Mphase)
     plt.show()

@@ -59,7 +59,7 @@ def main(folder, plotfield):
     ax.set_xlabel('Field (G)')
 
 if __name__ == "__main__":
-    folder = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/8/31/sweeping mod field/filtered'
-    plotfield = 7
+    folder = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/1/20220901_LiPC_ModFieldSweep/filtered'
+    plotfield = 30
     main(folder, plotfield)
     plt.show()

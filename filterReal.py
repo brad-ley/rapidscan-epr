@@ -4,6 +4,7 @@ from pathlib import Path as P
 from pathlib import PurePath as PP
 from scipy.signal import savgol_filter
 from readDataFile import read
+from statusBar import statusBar
 
 import PIL
 import matplotlib.pyplot as plt
@@ -106,9 +107,12 @@ def filt(filename, highpass=0, savgol_window=0, row=1, maxrow=1):
     # ax.plot(plott, plotsig+i, label=f'{label:.1f}', c='k', alpha=1/3 + 2/3*i/maxrow)
     ax.plot(plott, plotsig+row, c=cmap(row/maxrow))
 
+
 if __name__ == "__main__":
-    filename = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/8/31/sweeping mod field/M01_t=0098.214s.dat'
-    files = [ii for ii in P(filename).parent.iterdir() if ii.name.endswith('s.dat')]
+    folder = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/1/20220901_TEMPO_RS/159mA_t=8210.172s.dat'
+    if P(folder).is_file():
+        folder = P(folder).parent
+    files = [ii for ii in P(folder).iterdir() if ii.name.endswith('s.dat')]
     files.sort(key=lambda x: float(''.join([xx for xx in [ii for ii in P(x).stem.split('_') if 't=' in ii][0] if (isdigit(xx) or xx=='.')])))
     times = [float(''.join([ii for ii in [ll for ll in P(bb).stem.split('_') if 't=' in ll][0] if (isdigit(ii) or ii=='.')])) for bb in files]
     tstep = np.mean(np.diff(times))
@@ -119,9 +123,11 @@ if __name__ == "__main__":
     # tstep = 
     for i, f in enumerate(files):
         filt(f, highpass=10e6, savgol_window=5, row=i, maxrow=len(files))
+        statusBar((i+1)/len(files)*100)        
+
     cmap = mpl.cm.cool
     norm = mpl.colors.Normalize(vmin=0, vmax=len(files)*tstep)
     cbar = plt.colorbar(mappable=mpl.cm.ScalarMappable(norm=norm, cmap=cmap))
     cbar.ax.set_ylabel('Elapsed time (s)')
-    plt.savefig(P(filename).parent.joinpath('timestep_plot.png'), dpi=400)
+    plt.savefig(P(folder).joinpath('timestep_plot.png'), dpi=400)
     plt.show()
