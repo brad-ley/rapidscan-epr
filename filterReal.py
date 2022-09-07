@@ -72,8 +72,9 @@ def filt(filename, highpass=0, savgol_window=0, row=1, maxrow=1):
 
     # ax.plot(t, np.real(r))
 
-    fft = np.fft.fftshift(np.fft.fft(r))
-    freq = np.fft.fftshift(np.fft.fftfreq(len(fft), d=t[1]-t[0]))
+    n = len(r)
+    fft = np.fft.fftshift(np.fft.fft(r, n=n))
+    freq = np.fft.fftshift(np.fft.fftfreq(n, d=t[1]-t[0]))
     sign = np.sign(np.argmax(np.abs(fft)) - len(fft)//2)
     
 
@@ -92,8 +93,10 @@ def filt(filename, highpass=0, savgol_window=0, row=1, maxrow=1):
         real = savgol_filter(real, savgol_window, 2)
         imag = savgol_filter(imag, savgol_window, 2)
     sig = real + 1j * imag
+
     dic = {'time':t, 'avg': sig}
     d = pd.DataFrame(dic)
+
     if not P(filename).parent.joinpath('filtered').exists():
         P(filename).parent.joinpath('filtered').mkdir()
     d.to_csv(P(filename).parent.joinpath('filtered', P(filename).stem + '_realFilterMagnitude.dat'))
@@ -109,7 +112,7 @@ def filt(filename, highpass=0, savgol_window=0, row=1, maxrow=1):
 
 
 if __name__ == "__main__":
-    folder = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/1/20220901_TEMPO_RS/159mA_t=8210.172s.dat'
+    folder = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/2/C RS 5 s off, 5 s on, off/M01_153mA_LightOff_t=2732.191s.dat'
     if P(folder).is_file():
         folder = P(folder).parent
     files = [ii for ii in P(folder).iterdir() if ii.name.endswith('s.dat')]
@@ -120,9 +123,9 @@ if __name__ == "__main__":
     ax.set_ylabel('Signal (arb. u)')
     ax.set_yticklabels([])
     ax.set_xlabel('Time (s)')
-    # tstep = 
+
     for i, f in enumerate(files):
-        filt(f, highpass=10e6, savgol_window=5, row=i, maxrow=len(files))
+        filt(f, highpass=0, savgol_window=51, row=i, maxrow=len(files))
         statusBar((i+1)/len(files)*100)        
 
     cmap = mpl.cm.cool

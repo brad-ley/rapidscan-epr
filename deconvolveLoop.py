@@ -13,10 +13,10 @@ import pandas as pd
 
 
 def process(filename):
-    coil = 0.21
-    amplitude = 159
+    coil = 0.62
+    amplitude = 153
     frequency = 70e3
-    phase = -0.3
+    phase = 2
     B, M = deconvolve(filename, coil, amplitude, frequency, Bphase=-np.pi)
     M *= np.exp(1j * phase)
     d = pd.DataFrame({'B':B, 'M':M})
@@ -24,7 +24,7 @@ def process(filename):
 
 
 if __name__ == "__main__":
-    folder = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/1/20220901_TEMPO_RS/filtered/159mA_t=8210.172s_realFilterMagnitude.dat'
+    folder = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/2/C RS 5 s off, 5 s on, off/filtered'
     if P(folder).is_file():
         folder = P(folder).parent
     files = [ii for ii in P(folder).iterdir() if ii.name.endswith('realFilterMagnitude.dat')]
