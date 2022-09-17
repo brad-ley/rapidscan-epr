@@ -101,18 +101,19 @@ def filt(filename, highpass=0, savgol_window=0, row=1, maxrow=1):
         P(filename).parent.joinpath('filtered').mkdir()
     d.to_csv(P(filename).parent.joinpath('filtered', P(filename).stem + '_realFilterMagnitude.dat'))
 
-    plotsig = np.abs(sig)[len(d['time'])//4:-len(d['time'])//4]
+    plotsig = sig[len(d['time'])//4:-len(d['time'])//4]
     plotsig -= np.mean(plotsig[:len(plotsig)//20])
     plotsig /= np.max(np.abs(plotsig))
     plott = d['time'][len(d['time'])//4:-len(d['time'])//4]
-    plott += np.max(plott)*i*0.1
+    plott += np.max(plott)*row*0.1
     cmap = mpl.cm.get_cmap('cool', maxrow)
     # ax.plot(plott, plotsig+i, label=f'{label:.1f}', c='k', alpha=1/3 + 2/3*i/maxrow)
-    ax.plot(plott, plotsig+row, c=cmap(row/maxrow))
+    ax.plot(plott, np.real(plotsig)+row, c=cmap(row/maxrow))
+    # ax.plot(plott, np.imag(plotsig)+row, c=cmap(row/maxrow))
 
 
 if __name__ == "__main__":
-    folder = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/2/C RS 5 s off, 5 s on, off/M01_153mA_LightOff_t=2732.191s.dat'
+    folder = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/13/old avg'
     if P(folder).is_file():
         folder = P(folder).parent
     files = [ii for ii in P(folder).iterdir() if ii.name.endswith('s.dat')]
@@ -125,7 +126,7 @@ if __name__ == "__main__":
     ax.set_xlabel('Time (s)')
 
     for i, f in enumerate(files):
-        filt(f, highpass=0, savgol_window=51, row=i, maxrow=len(files))
+        filt(f, highpass=-900e6, savgol_window=0, row=i, maxrow=len(files))
         statusBar((i+1)/len(files)*100)        
 
     cmap = mpl.cm.cool

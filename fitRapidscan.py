@@ -36,13 +36,15 @@ def fit(t, r, fitB1=False):
     :param fitB1: True or False -- default False so that it uses default from simulateRapidscan.py
     """
     r = r / np.max(np.abs(r))
-    f = 70e3
-    B = 0.1325/2 * 150 # initial guess for B
-    fitlim = B / 2
-    sin = np.sin(2 * np.pi * f * t + np.pi) # usually start at zero crossing of down sweep
-    field = B * sin 
+    f = 69e3
+    B = 0.5845 * 156 # initial guess for B
+    fitlim = (0, 35) # center 1/2 chunk
+    sin = np.sin(2 * np.pi * f * t + -np.pi/2) # usually start at zero crossing of down sweep
+    field = B / 2 * sin 
     l = min(np.argmin(field), np.argmax(field))
     h = max(np.argmin(field), np.argmax(field))
+    # l = np.where(np.abs(field) < fitlim)[0][0]
+    # h = np.where(np.abs(field) < fitlim)[0][-1]
     
     t = t[l:h]
     t -= np.min(t)
@@ -51,9 +53,11 @@ def fit(t, r, fitB1=False):
     r -= np.mean(r)
     r /= np.max(np.abs(r))
 
-    midt = t[np.abs(field[l:h]) < fitlim]
-    midB = field[l:h][np.abs(field[l:h]) < fitlim]
-    midr = r[np.abs(field[l:h]) < fitlim]
+    b = field[l:h]
+
+    midt = t[np.logical_and(b > fitlim[0], b < fitlim[1])]
+    midB = b[np.logical_and(b > fitlim[0], b < fitlim[1])] 
+    midr = r[np.logical_and(b > fitlim[0], b < fitlim[1])] 
 
 
     if fitB1:
@@ -64,7 +68,7 @@ def fit(t, r, fitB1=False):
             t, sol, omega = Fp(t, T2, dB, amp, B1, phase)
             out = np.real(sol.y[0] + 1j * sol.y[1])
             return out / np.max(np.abs(out))
-        popt, pcov = cf(F, midt, midr, p0=[190e-9, B/10, B, 0.14, 0], )
+        popt, pcov = cf(F, midt, midr, p0=[190e-9, B/10, B/2, 0.14, 0], )
     else:
         def Fp(t, T2, dB, amp, phase):
             t, sol, omega = Bloch(1e-3, T2, dB, 70e3, amp, t=t, phase=phase)
@@ -73,12 +77,12 @@ def fit(t, r, fitB1=False):
             t, sol, omega = Fp(t, T2, dB, amp, phase)
             out = np.real(sol.y[0] + 1j * sol.y[1])
             return out / np.max(np.abs(out))
-        # popt, pcov = cf(F, midt, midr, p0=[3e-7, B/10, B, 0], )
-        popt, pcov = cf(F, midt, midr, p0=[175e-9, 1e-1, B, 5/4*np.pi], )
+        p0 = [200e-9, -15, B/2, -1/16 * np.pi]
+        popt, pcov = cf(F, midt, midr, p0=p0)
 
+    # popt = p0
     fig, ax = plt.subplots(figsize=(8,6))
-    _, sol, omega = Fp(midt, *popt)
-    # _, sol, omega = Fp(midt, 170e-9, 0.16, 9, 3.81)
+    _, sol, omega = Fp(t, *popt)
     out = np.real(sol.y[0] + 1j * sol.y[1])
     out /= np.max(np.abs(out))
     # ax.set_title(rf'Fit: $T_2$= {popt[0]:.1e} s, $B_m=$ {int(popt[2])} G, $\Delta_B=$ {popt[1]:.2f} G, $B_1=$ {popt[3]:.2f} G')
@@ -88,13 +92,12 @@ def fit(t, r, fitB1=False):
     axr = ax.twinx()
     axr.set_ylabel('Field (G)', c='b')
     axr.tick_params(axis='y', labelcolor='b')
-    axr.plot(midt, omega, c='b', alpha=0.5, ls='--')
+    axr.plot(midt, omega[np.logical_and(b > fitlim[0], b < fitlim[1])], c='b', alpha=0.5, ls='--')
     ax.plot(midt, midr, label='Raw', c='k')
-    ax.plot(midt, out, label='Fit', c='r', ls=':')
+    ax.plot(midt, out[np.logical_and(b > fitlim[0], b < fitlim[1])], label='Fit', c='r', ls=':')
     plt.savefig(P(FILENAME).parent.joinpath(P(FILENAME).stem + '_fitRapidscan.png'), dpi=400)
 
     fig, ax = plt.subplots(figsize=(8,6))
-    _, sol, omega = Fp(t, *popt)
     out = np.real(sol.y[0] + 1j * sol.y[1])
     out /= np.max(np.abs(out))
     # ax.set_title(rf'Fit: $T_2$= {popt[0]:.1e} s, $B_m=$ {int(popt[2])} G, $\Delta_B=$ {popt[1]:.2f} G, $B_1=$ {popt[3]:.2f} G')
@@ -110,7 +113,7 @@ def fit(t, r, fitB1=False):
     plt.savefig(P(FILENAME).parent.joinpath('fullRapidscan.png'), dpi=400)
 
 if __name__ == "__main__":
-    FILENAME = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/8/31/M01_150mA_t=3244.999s_realFilterMagnitude.dat'
+    FILENAME = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/15/156mA_-4G_t=7630.495s.dat'
     try:
         d = pd.read_csv(FILENAME)
         t = d['time'].to_numpy()
@@ -118,12 +121,13 @@ if __name__ == "__main__":
         dat = np.array([ii['real'] + 1j * ii['imag'] for ii in l])
     except KeyError: # handle files ending in realFilterMagnitude.dat
         d = pd.read_csv(P(FILENAME),
-                        # skiprows=1,
+                        skiprows=4,
                         sep=',',
                         on_bad_lines='skip',
                         engine='python',)
 
-        dat = [ast.literal_eval(ii) for ii in d['avg'].to_numpy()]
+        dat = d[' Y[0]'].to_numpy()
+        t = np.linspace(0, 2e-9*len(dat), len(dat))
 
     r = np.abs(dat)
     fit(t, r)

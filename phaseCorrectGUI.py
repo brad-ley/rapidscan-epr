@@ -497,4 +497,4 @@ app.layout = html.Div(
     style={})
 
 if __name__ == '__main__':
-    app.run_server(debug=True, threaded=True, port=1027)
+    app.run_server(debug=True, threaded=True,)
