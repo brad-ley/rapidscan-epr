@@ -101,13 +101,13 @@ def plotfit(datajson, fitjson, trange):
 @app.callback(
         Output('dummy2', 'data'),
         Input('save', 'n_clicks'),
-        State('decon', 'data'),
+        State('phased', 'data'),
         State('filepath', 'value'),
         prevent_initial_call=True
         )
-def save(_, datajson, filepath):
+def save(_, phasedjson, filepath):
     try:
-        d = pd.read_json(datajson, orient='split')
+        d = pd.read_json(phasedjson, orient='split')
         d.to_csv(P(filepath).parent.joinpath(P(filepath).stem + '_decon.dat'))
     except ValueError:
         pass
@@ -122,17 +122,24 @@ def save(_, datajson, filepath):
         State('freq', 'value'),
         State('bphase', 'value'),
         State('filepath', 'value'),
+        State('addpi', 'n_clicks'),
+        State('sigphase', 'value'),
+        State('curphase', 'data')
         )
-def batch(_, coil, amp, freq, bphase, filepath):
+def batch(_, coil, amp, freq, bphase, filepath, addpi_n, sigphase, curphi):
     try:
+    # if True:
         fs = [ii for ii in P(filepath).parent.iterdir() if ii.name.endswith('s.dat')]
         for f in fs:
             d = pd.read_csv(f, skiprows=4)
             t = np.linspace(0, 2e-9 * len(d['time']), len(d['time']))
             d['time'] = t
             datajson = d.to_json(orient='split')
-            outd = pd.read_json(decon(datajson, coil, amp, freq, bphase), orient='split')
-            save(0, decon(datajson, coil, amp, freq, bphase), f)
+            outjson = decon(datajson, coil, amp, freq, bphase)
+            temp = pd.read_json(outjson, orient='split')
+            _, outd, _, _ = phase(0, addpi_n, sigphase, outjson, curphi)
+            temp = pd.read_json(outd, orient='split')
+            save(0, outd, f)
     except ValueError:
         pass
     return ''
@@ -156,6 +163,7 @@ def phase(auto_n, addpi_n, sigphase, datajson, curphi):
         curphi = sigphase
     phi = curphi % (2 * np.pi)
     try:
+    # if True:
         d = pd.read_json(datajson, orient='split')
         res = d['abs'] + 1j * d['disp']
         if 'findphase' == ctx.triggered_id:

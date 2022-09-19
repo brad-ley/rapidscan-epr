@@ -31,7 +31,7 @@ plt.rcParams['ytick.minor.width'] = 1
 plt.rcParams['lines.linewidth'] = 2
 
 
-def process(folder, plotfield, deconvolved=True, makenew=False):
+def process(folder, plotfields, deconvolved=True, makenew=False):
     fig, ax = plt.subplots(figsize=(8,6))
 
     if deconvolved:
@@ -105,19 +105,19 @@ def process(folder, plotfield, deconvolved=True, makenew=False):
         x1 = min(np.argmin(loopdata[:, 0]), np.argmax(loopdata[:, 0]))
         x2 = max(np.argmin(loopdata[:, 0]), np.argmax(loopdata[:, 0]))
 
-    vals = np.where((np.abs(loopdata[x1:x2, 0]) < plotfield) == True)[0]
+    vals = np.where(np.logical_and(loopdata[x1:x2, 0] > plotfields[0], loopdata[x1:x2, 0] < plotfields[1]) == True)[0]
     l = vals[0]
     h = vals[-1]
 
     loopdata[x1:x2, 1:] -= np.mean(loopdata[x1:x2, 1][h-(h-l)//10:h])
-    mn = np.min(np.min(loopdata[x1:x2, 1:][np.abs(loopdata[x1:x2, 0]) < plotfield]))
-    mx = np.max(np.max(loopdata[x1:x2, 1:][np.abs(loopdata[x1:x2, 0]) < plotfield]))
+    mn = np.min(np.min(loopdata[x1:x2, 1:][l:h]))
+    mx = np.max(np.max(loopdata[x1:x2, 1:][l:h]))
 
     line, = ax.plot(loopdata[x1:x2, 0][l:h], loopdata[x1:x2, 1][l:h]/mx, c=cmap(ts[0]))
     ax.set_ylabel('Signal (arb. u)')
     ax.set_xlabel('Field (G)')
     ax.set_ylim([mn, 1.05])
-    text = ax.text(1/2 * plotfield, 0.9, f'$t={ts[0]:.2f}$ s')
+    text = ax.text(1/2 * plotfields[1], 0.9, f'$t={ts[0]:.2f}$ s')
 
     def animate(i):
         line.set_ydata(loopdata[x1:x2, i][l:h]/mx)
@@ -133,7 +133,7 @@ if __name__ == "__main__":
     folder = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/15'
     if P(folder).is_file():
         folder = P(folder).parent
-    plotfield = 30
-    tstep, tag, ani = process(folder, plotfield, deconvolved=True, makenew=False)
+    plotfields = (-40, 40)
+    tstep, tag, ani = process(folder, plotfields, deconvolved=True, makenew=True)
     ani.save(P(folder).joinpath(tag + '_animation.gif'), dpi=400, writer=PillowWriter(fps=1/(tstep)))
     # plt.show()
