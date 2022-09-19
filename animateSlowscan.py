@@ -37,6 +37,8 @@ def process(folder, plotfield, deconvolved=True, makenew=False):
     if deconvolved:
         tag = 'deconvolved'
         files = [ii for ii in P(folder).iterdir() if ii.name.endswith('slowscan.dat')]
+        if not files:
+            files = [ii for ii in P(folder).iterdir() if ii.name.endswith('decon.dat')]
     else:
         tag = 'filtered'
         files = [ii for ii in P(folder).iterdir() if ii.name.endswith('Magnitude.dat')]
@@ -79,7 +81,10 @@ def process(folder, plotfield, deconvolved=True, makenew=False):
                             on_bad_lines='skip',
                             engine='python',)
             if deconvolved:
-                M = np.array([ast.literal_eval(ii) for ii in d['M']])
+                try:
+                    M = np.array([ast.literal_eval(ii) for ii in d['M']])
+                except KeyError:
+                    M = d['abs'].to_numpy()
             else:
                 M = np.array([ast.literal_eval(ii) for ii in d['avg']])
 
@@ -103,9 +108,7 @@ def process(folder, plotfield, deconvolved=True, makenew=False):
     vals = np.where((np.abs(loopdata[x1:x2, 0]) < plotfield) == True)[0]
     l = vals[0]
     h = vals[-1]
-    print(l, h)
 
-    print(h-(h-l)//10, h)
     loopdata[x1:x2, 1:] -= np.mean(loopdata[x1:x2, 1][h-(h-l)//10:h])
     mn = np.min(np.min(loopdata[x1:x2, 1:][np.abs(loopdata[x1:x2, 0]) < plotfield]))
     mx = np.max(np.max(loopdata[x1:x2, 1:][np.abs(loopdata[x1:x2, 0]) < plotfield]))
@@ -127,7 +130,7 @@ def process(folder, plotfield, deconvolved=True, makenew=False):
 
 
 if __name__ == "__main__":
-    folder = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/14'
+    folder = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/15'
     if P(folder).is_file():
         folder = P(folder).parent
     plotfield = 30

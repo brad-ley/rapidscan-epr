@@ -10,7 +10,7 @@ import diskcache
 import numpy as np
 import pandas as pd
 import plotly.express as px
-from dash import dcc, html
+from dash import dcc, html, ctx
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 from dash.long_callback import DiskcacheLongCallbackManager
@@ -18,6 +18,7 @@ from joblib import Memory, Parallel, delayed
 from plotly import graph_objects as go
 from plotly.offline import iplot
 from scipy.optimize import curve_fit as cf
+from scipy.integrate import cumtrapz, trapz
 from scipy.signal import hilbert, sawtooth, windows
 
 from cycle import cycle
@@ -83,42 +84,95 @@ def disable(_):
         )
 def plotfit(datajson, fitjson, trange):
     try:
+    # if True:
         if fitjson:
-            fit = pd.read_json(fitjson, orient='split')
-            fig = px.line(fit, x='time', y=['raw', 'fit'])
+            d = pd.read_json(fitjson, orient='split')
+            fig = px.line(d, x='time', y=['raw', 'fit'])
         else:
             d = pd.read_json(datajson, orient='split')
             fig = px.line(d, x='time', y=' Y[0]')
         fig.update_xaxes(range=np.array(trange)*1e-6)
         fig.update_layout(margin=margin)
     except:
-        fig = make_fig()
+        return make_fig()
     return fig
+
+
+@app.callback(
+        Output('dummy2', 'data'),
+        Input('save', 'n_clicks'),
+        State('decon', 'data'),
+        State('filepath', 'value'),
+        prevent_initial_call=True
+        )
+def save(_, datajson, filepath):
+    try:
+        d = pd.read_json(datajson, orient='split')
+        d.to_csv(P(filepath).parent.joinpath(P(filepath).stem + '_decon.dat'))
+    except ValueError:
+        pass
+    return ''
+
+
+@app.callback(
+        Output('dummy', 'data'),
+        Input('batch', 'n_clicks'),
+        State('coil', 'value'),
+        State('amp', 'value'),
+        State('freq', 'value'),
+        State('bphase', 'value'),
+        State('filepath', 'value'),
+        )
+def batch(_, coil, amp, freq, bphase, filepath):
+    try:
+        fs = [ii for ii in P(filepath).parent.iterdir() if ii.name.endswith('s.dat')]
+        for f in fs:
+            d = pd.read_csv(f, skiprows=4)
+            t = np.linspace(0, 2e-9 * len(d['time']), len(d['time']))
+            d['time'] = t
+            datajson = d.to_json(orient='split')
+            outd = pd.read_json(decon(datajson, coil, amp, freq, bphase), orient='split')
+            save(0, decon(datajson, coil, amp, freq, bphase), f)
+    except ValueError:
+        pass
+    return ''
 
 
 @app.callback(
         Output('deconvolved', 'figure'),
         Output('phased', 'data'),
+        Output('curphase', 'data'),
+        Output('sigphase', 'value'),
         Input('findphase', 'n_clicks'),
         Input('addpi', 'n_clicks'),
         Input('sigphase', 'value'),
         Input('decon', 'data'),
+        State('curphase', 'data'),
         prevent_initial_call=True
         )
-def phase(_, n, sigphase, datajson):
+def phase(auto_n, addpi_n, sigphase, datajson, curphi):
     phased = pd.DataFrame() 
+    if not curphi:
+        curphi = sigphase
+    phi = curphi % (2 * np.pi)
     try:
         d = pd.read_json(datajson, orient='split')
         res = d['abs'] + 1j * d['disp']
-        avg = np.inf
-        phis = list(range(0, 2*np.pi), 720) 
-        for ii, phi in enumerate(phis):
-            t = res * np.exp(1j * phi)
-            a = np.mean(np.imag(t))
-            if a < avg:
-                avg = a
-                ind = ii
-        phi = phis[ii]
+        if 'findphase' == ctx.triggered_id:
+            phis = np.linspace(0, 2*np.pi, 720)
+            # o = [trapz(np.real(res * np.exp(1j * ii))) for ii in phis]
+            o = [np.max(np.real(res * np.exp(1j * ii))) for ii in phis]
+            # o = [trapz(np.imag(res * np.exp(1j * ii))) for ii in phis]
+            phi = phis[np.argmax(o)]
+            # phi = phis[np.argmin(np.abs(o))]
+        elif 'addpi' == ctx.triggered_id:
+            phi += np.pi / 2
+        elif 'sigphase' == ctx.triggered_id:
+            sigphase_old = phi % (np.pi / 2)
+            phi +=  -1 * sigphase_old + sigphase
+
+        sigphase = phi % (np.pi / 2)
+
         res *= np.exp(1j * phi)
         phased['B'] = d['B']
         phased['abs'] = np.real(res)
@@ -126,10 +180,10 @@ def phase(_, n, sigphase, datajson):
 
         fig = px.line(phased, x='B', y=['abs', 'disp'])
         fig.update_layout(margin=margin)
-        return fig, phased 
+        return fig, phased.to_json(orient='split'), phi, sigphase
 
     except KeyError:
-        return dash.no_update, phased
+        return dash.no_update, phased.to_json(orient='split'), phi, sigphase
 
 
 
@@ -187,8 +241,8 @@ def fit(_, datajson, coil, amplitude, freq, bphase, trange):
         fitd['time'] = t
         fitd['raw'] = y
         fitd['fit'] = Fp(t, *popt)
-        return fitd.to_json(orient='split'), f'T_2={popt[0]*1e9:.1f} ns; ' + f'dB={popt[1]:.1f} G; ' + f'f={popt[2]*1e-3:.1f} kHz; ' + f'Bmod={2*popt[3]/amplitude:.2f} G/mA; ' + f'Bphase={popt[4]:.1f} rad'
-    except:
+        return fitd.to_json(orient='split'), f'Fit parameters: T2={popt[0]*1e9:.1f} ns; ' + f'dB={popt[1]:.1f} G; ' + f'f={popt[2]*1e-3:.1f} kHz; ' + f'Bmod={2*popt[3]/amplitude:.2f} G/mA; ' + f'Bphi={popt[4]:.1f} rad'
+    except FileExistsError:
         return make_fig(), fitd.to_json(orient='split'), html.Div(f"Fitting error",
                             style={'color': 'red'
                                    })
@@ -201,9 +255,8 @@ def fit(_, datajson, coil, amplitude, freq, bphase, trange):
     Input('amp', 'value'),
     Input('freq', 'value'),
     Input('bphase', 'value'),
-    Input('addpi', 'n_clicks')
         )
-def decon(datajson, coil, amplitude, freq, bphase, n_clicks):
+def decon(datajson, coil, amplitude, freq, bphase):
     freq = freq * 1e3
     outd = pd.DataFrame()
     try:
@@ -256,22 +309,29 @@ def decon(datajson, coil, amplitude, freq, bphase, n_clicks):
     Output('fileout', 'children'),
     Output('init', 'figure'),
     Output('file', 'data'),
+    Output('timerange', 'min'),
+    Output('timerange', 'max'),
     Input('filepath', 'value'),
     prevent_initial_call=False)
 def parse_contents(filepath):
     d = pd.DataFrame()
+    tmin = dash.no_update
+    tmax = dash.no_update
     try:
-            d = pd.read_csv(filepath, skiprows=4)
-            t = np.linspace(0, 2e-9 * len(d['time']), len(d['time']))
-            d['time'] = t
-            dat = d[' Y[0]'].to_numpy()
+        d = pd.read_csv(filepath, skiprows=4)
+        t = np.linspace(0, 2e-9 * len(d['time']), len(d['time']))
+        d['time'] = t
+        dat = d[' Y[0]'].to_numpy()
 
-            fig = px.line(d, x='time', y=' Y[0]')
-            fig.update_layout(margin=margin)
+        tmin = np.min(t) * 1e6
+        tmax = np.max(t) * 1e6
 
-            h = html.Div(f"Loaded {P(filepath).name}",
-                            style={'color': 'green'
-                                   })
+        fig = px.line(d, x='time', y=' Y[0]')
+        fig.update_layout(margin=margin)
+
+        h = html.Div(f"Loaded {P(filepath).name}",
+                        style={'color': 'green'
+                               })
     except (FileExistsError, FileNotFoundError):
     # except TypeError:
         if filepath in ['/', '']:
@@ -285,11 +345,17 @@ def parse_contents(filepath):
         fig = make_fig()
     except OSError:
     # except TypeError:
-        h = html.Div('Filename too long', style={'color': 'red'})
+        h = html.Div('Enter file', style={'color': 'red'})
 
         fig = make_fig()
 
-    return h, fig, d.to_json(orient='split')
+    except KeyError:
+    # except TypeError:
+        h = html.Div("Ensure file ends in 's.dat'", style={'color': 'red'})
+
+        fig = make_fig()
+
+    return h, fig, d.to_json(orient='split'), tmin, tmax
 
 
 app.layout = html.Div(
@@ -498,8 +564,8 @@ app.layout = html.Div(
             html.Div(
                 [
                     dcc.RangeSlider(
-                        0,
-                        20,
+                        min=0,
+                        max=20,
                         id='timerange',
                         value=[2, 5],
                         marks=None,
@@ -535,10 +601,29 @@ app.layout = html.Div(
                         'margin': '0px 0px 10px 0%',
                         'display': 'inline-block'
                     }),
-                html.Div(id='fileout', children=''),
-                html.Div(id='fit_params', children=''),
-            ],
-            style={'margin': '10px 0px 0px 30px'}),], style={'width': '49%', 'display':'inline-block', 'verticalAlign': 'top'}),
+                html.Div(id='fileout', children='Enter file above'),
+                html.Div(id='fit_params', children='Fit parameters'),
+            html.Button(id='save',
+                        n_clicks=0,
+                        children='Save deconvolved',
+                        style={
+                            'background-color': 'lightgreen',
+                            'margin': '5px 10px 0px 0px',
+                            'text-align': 'center',
+                            'display': 'inline-block'
+                        }),
+            html.Button(id='batch',
+                        n_clicks=0,
+                        children='Deconvolve batch',
+                        style={
+                            'background-color': 'lightblue',
+                            'margin': '5px 0px 0px 0px',
+                            'text-align': 'center',
+                            'display': 'inline-block'
+                        }),
+                        ],
+            style={'margin': '10px 0px 0px 30px'}),], style={'width': '49%', 'display':'inline-block', 'verticalAlign': 'top'}
+        ),
         html.Div(
             [
                 dcc.Graph(
@@ -552,7 +637,10 @@ app.layout = html.Div(
         dcc.Store(id='file'),
         dcc.Store(id='decon'),
         dcc.Store(id='fitdata'),
-        dcc.Store(id='phased')
+        dcc.Store(id='phased'),
+        dcc.Store(id='curphase'),
+        dcc.Store(id='dummy'),
+        dcc.Store(id='dummy2'),
     ],
     style={})
 
