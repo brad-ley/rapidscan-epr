@@ -74,8 +74,9 @@ def plotfits(folder, FIT_T=44):
         ax.plot(ts[ts > FIT_T], exp(fitt, *popt), c='black', ls='--', alpha=0.5, lw=lw)
         # if fitdict[key] in ['$\Delta \omega$', 'Peak-to-peak']:
         if fitdict[key] in ['$\Delta \omega$']:
+        # if fitdict[key] in ['Peak-to-peak']:
             line = axw.scatter(ts, fits[:, i], label=f'{fitdict[key]}', c='black')
-            popt, pcov = cf(exp, fitt, fits[:, i][ts > FIT_T])
+            popt, pcov = cf(exp, fitt, fits[:, i][ts > FIT_T], p0=[np.max(fits[:, i]), -(np.max(fits[:, i]) - np.min(fits[:, 1])), popt[-1]])
             if fitdict[key] == 'Peak-to-peak':
                 label = 'pk2pk'
             else:
