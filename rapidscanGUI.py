@@ -140,7 +140,7 @@ def batch(_, coil, amp, freq, bphase, filepath, addpi_n, sigphase, curphi):
             _, outd, _, _ = phase(0, addpi_n, sigphase, outjson, curphi)
             temp = pd.read_json(outd, orient='split')
             save(0, outd, f)
-    except ValueError:
+    except (KeyError, ValueError):
         pass
     return ''
 

@@ -113,8 +113,10 @@ def process(folder, plotfields, deconvolved=True, makenew=False, showfits=True):
                 popt, pcov = cf(lorentzian, B, np.real(M), p0=[
                                 np.min(np.real(M)), np.max(np.real(M)), 5, 5])
                 fity = lorentzian(B, *popt)
+                pk2pk = np.abs(B[np.argmin(np.diff(fity))] - B[np.argmax(np.diff(fity))])
+                out = list(popt) + [pk2pk]
                 fitdata[:, i + 1] = fity
-                fitparams[f.name + '_popt'] = repr(list(popt))
+                fitparams[f.name + '_popt'] = repr(list(out))
                 fitparams[f.name + '_pcov'] = repr(list(np.sqrt(np.diag(pcov))))
             except RuntimeError:
                 pass

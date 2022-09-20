@@ -57,9 +57,9 @@ def main(filename):
         peaksname = P(filename).parent.joinpath( P(filename).stem.strip('fitparams') + 'peaks.txt')
         peaks = np.loadtxt(peaksname)
         fits = np.c_[fits, peaks[:, 1]]
-        fitdict = {1: '$\Delta y$', 2: 'A', 3: '$x_0$', 4: '$\Delta \omega$', 5: 'Raw A'}
+        fitdict = {1: '$\Delta y$', 2: 'A', 3: '$x_0$', 4: '$\Delta \omega$', 5: 'Peak-to-peak', 6: 'Raw A'}
     except FileNotFoundError:
-        fitdict = {1: '$\Delta y$', 2: 'A', 3: '$x_0$', 4: '$\Delta \omega$'}
+        fitdict = {1: '$\Delta y$', 2: 'A', 3: '$x_0$', 4: '$\Delta \omega$', 5: 'Peak-to-peak'}
         pass
 
     FIT_T = 44
@@ -73,10 +73,14 @@ def main(filename):
         popt, pcov = cf(exp, fitt, fity)
         line = ax.scatter(ts, y, label=f'{fitdict[key]}, {popt[-1]:.1f} s')
         ax.plot(ts[ts > FIT_T], exp(fitt, *popt), c='black', ls='--', alpha=0.5, lw=lw)
-        if fitdict[key] == '$\Delta \omega$':
-            line = axw.scatter(ts, fits[:, i], label=f'{fitdict[key]}', c='black')
+        if fitdict[key] in ['$\Delta \omega$', 'Peak-to-peak']:
+            line = axw.scatter(ts, fits[:, i], label=f'{fitdict[key]}')
             popt, pcov = cf(exp, fitt, fits[:, i][ts > FIT_T])
-            axw.plot(ts[ts > FIT_T], exp(fitt, *popt), c='red', ls='--', lw=lw, label=rf'$\tau={popt[-1]:.1f}$ s')
+            if fitdict[key] == 'Peak-to-peak':
+                label = 'pk2pk'
+            else:
+                label = fitdict[key].strip('$')
+            axw.plot(ts[ts > FIT_T], exp(fitt, *popt), c='red', ls='--', lw=lw, label=rf'$\tau_{{{label}}}={popt[-1]:.1f}$ s')
     ax.set_ylim(top=1.25)
     ax.set_ylabel('Fit value (arb. u)')
     axw.set_ylabel('Width (G)')
