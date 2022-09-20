@@ -214,7 +214,7 @@ def main(filename, coil, amplitude, frequency, plotfield, Bphase=-1 / 2 * np.pi,
 
 
 if __name__ == "__main__":
-    FILENAME = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/15/156mA_-4G_t=7630.495s.dat'
+    FILENAME = ''
     coil = 0.57
     amplitude = 158  # mA
     frequency = 69e3

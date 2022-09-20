@@ -258,6 +258,7 @@ def fit(_, datajson, coil, amplitude, freq, bphase, trange):
 
 @app.callback(
     Output('decon', 'data'),
+    # Input('fitdata', 'data'),
     Input('file', 'data'),
     Input('coil', 'value'),
     Input('amp', 'value'),
@@ -269,7 +270,12 @@ def decon(datajson, coil, amplitude, freq, bphase):
     outd = pd.DataFrame()
     try:
 
-    # if True:
+        # print(ctx.triggered_id)
+        # if 'fitdata' == ctx.triggered_id:
+        #     d = pd.read_json(fitjson, orient='split')
+        #     t = d['time'].to_numpy()
+        #     sig = d['fit'].to_numpy(dtype='complex128')
+        # elif 'file' == ctx.triggered_id:
         d = pd.read_json(datajson, orient='split')
         t = d['time'].to_numpy()
         sig = d[' Y[0]'].to_numpy(dtype='complex128')
