@@ -17,6 +17,7 @@ from statusBar import statusBar
 
 from deconvolveRapidscan import lorentzian
 from filterReal import isdigit
+from fitsVStime import plotfits
 
 plt.style.use(['science'])
 rc('text.latex', preamble=r'\usepackage{cmbright}')
@@ -184,7 +185,6 @@ def process(folder, plotfields, deconvolved=True, makenew=False, showfits=True):
 
 if __name__ == "__main__":
     folder = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/19/GdAsLOV/time dep 5k'
-
     if P(folder).is_file():
         folder = P(folder).parent
     plotfields = (-45, 45)
@@ -194,4 +194,5 @@ if __name__ == "__main__":
              dpi=400, writer=PillowWriter(fps=1 / (tstep)))
     ani.save(P(folder).joinpath(tag + '_animationFAST.gif'),
              dpi=400, writer=PillowWriter(fps=10))
+    plotfits(folder, FIT_T=44)
     # plt.show()

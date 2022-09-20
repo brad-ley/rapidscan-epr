@@ -10,8 +10,7 @@ from matplotlib import rc
 from readDataFile import read
 from scipy.integrate import cumtrapz
 from scipy.optimize import curve_fit as cf
-
-from animateSlowscan import isdigit
+from filterReal import isdigit
 
 plt.style.use(['science'])
 rc('text.latex', preamble=r'\usepackage{cmbright}')
@@ -33,7 +32,8 @@ def exp(x, A, B, c):
     return A + B*np.exp(-x/c)
 
 
-def main(filename):
+def plotfits(folder, FIT_T=44):
+    filename = P(folder).joinpath('combined_deconvolved_fitparams.txt')
     data = ast.literal_eval(P(filename).read_text())
 
     times = [float(''.join([ii for ii in ''.join([ll for ll in P(bb).stem.split(
@@ -54,7 +54,7 @@ def main(filename):
 
     fits = np.array(fits)
     try:
-        peaksname = P(filename).parent.joinpath( P(filename).stem.strip('fitparams') + 'peaks.txt')
+        peaksname = P(folder).joinpath('combined_deconvolved_peaks.txt')
         peaks = np.loadtxt(peaksname)
         fits = np.c_[fits, peaks[:, 1]]
         fitdict = {1: '$\Delta y$', 2: 'A', 3: '$x_0$', 4: '$\Delta \omega$', 5: 'Peak-to-peak', 6: 'Raw A'}
@@ -62,7 +62,6 @@ def main(filename):
         fitdict = {1: '$\Delta y$', 2: 'A', 3: '$x_0$', 4: '$\Delta \omega$', 5: 'Peak-to-peak'}
         pass
 
-    FIT_T = 44
     lw=2
     for i, key in enumerate(fitdict.keys()):
         y = np.copy(fits[:, i])
@@ -73,8 +72,9 @@ def main(filename):
         popt, pcov = cf(exp, fitt, fity)
         line = ax.scatter(ts, y, label=f'{fitdict[key]}, {popt[-1]:.1f} s')
         ax.plot(ts[ts > FIT_T], exp(fitt, *popt), c='black', ls='--', alpha=0.5, lw=lw)
-        if fitdict[key] in ['$\Delta \omega$', 'Peak-to-peak']:
-            line = axw.scatter(ts, fits[:, i], label=f'{fitdict[key]}')
+        # if fitdict[key] in ['$\Delta \omega$', 'Peak-to-peak']:
+        if fitdict[key] in ['$\Delta \omega$']:
+            line = axw.scatter(ts, fits[:, i], label=f'{fitdict[key]}', c='black')
             popt, pcov = cf(exp, fitt, fits[:, i][ts > FIT_T])
             if fitdict[key] == 'Peak-to-peak':
                 label = 'pk2pk'
@@ -87,11 +87,11 @@ def main(filename):
     for a in [ax, axw]:
         a.set_xlabel('Time (s)')
         a.legend()
-    fig.savefig(P(filename).parent.joinpath('timedepfits.png'), dpi=400)
-    figw.savefig(P(filename).parent.joinpath('LWfit.png'), dpi=400)
+    fig.savefig(P(folder).joinpath('timedepfits.png'), dpi=400)
+    figw.savefig(P(folder).joinpath('LWfit.png'), dpi=400)
 
 
 if __name__ == "__main__":
-    filename = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/19/GdAsLOV/time dep 5k/combined_deconvolved_fitparams.txt'
-    main(filename)
+    folder = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/19/GdAsLOV/time dep 5k/'
+    plotfits(folder, FIT_T=44)
     plt.show()
