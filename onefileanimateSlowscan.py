@@ -15,7 +15,7 @@ from scipy.integrate import cumtrapz
 from scipy.optimize import curve_fit as cf
 from statusBar import statusBar
 
-from deconvolveRapidscan import lorentzian
+from deconvolveRapidscan import lorentzian, gaussian
 from filterReal import isdigit
 from fitsVStime import plotfits
 
@@ -35,90 +35,54 @@ plt.rcParams['ytick.minor.width'] = 1
 plt.rcParams['lines.linewidth'] = 2
 
 
-def process(folder, plotfields, deconvolved=True, makenew=False, showfits=True):
+def process(filename, plotfields, deconvolved=True, makenew=False, showfits=True):
     fig, ax = plt.subplots(figsize=(8, 6))
+    dat = pd.read_csv(filename)
+    cols = [ii for ii in dat.columns if 'abs' in ii]
 
-    if deconvolved:
-        tag = 'deconvolved'
-        files = [ii for ii in P(folder).iterdir()
-                 if ii.name.endswith('slowscan.dat')]
-
-        if not files:
-            files = [ii for ii in P(folder).iterdir()
-                     if ii.name.endswith('decon.dat')]
-    else:
-        tag = 'filtered'
-        files = [ii for ii in P(folder).iterdir()
-                 if ii.name.endswith('Magnitude.dat')]
-    files.sort(key=lambda x: float(''.join([xx for xx in [ii for ii in P(
-        x).stem.split('_') if 't=' in ii][0] if (isdigit(xx) or xx == '.')])))
-    times = [float(''.join([ii for ii in [ll for ll in P(bb).stem.split(
-        '_') if 't=' in ll][0] if (isdigit(ii) or ii == '.')])) for bb in files]
+    times = np.array(ast.literal_eval(P(filename).parent.joinpath('times.txt').read_text()))
     tstep = np.mean(np.diff(times))
     ts = np.insert(np.diff(times), 0, 0)
     ts = cumtrapz(ts)
     ts = np.insert(ts, 0, 0)
 
-    cmap = mpl.cm.get_cmap('cool', len(files))
-    norm = mpl.colors.Normalize(vmin=0, vmax=len(files) * tstep)
+    cmap = mpl.cm.get_cmap('cool', len(cols))
+    norm = mpl.colors.Normalize(vmin=0, vmax=len(cols) * tstep)
     cbar = plt.colorbar(mappable=mpl.cm.ScalarMappable(norm=norm, cmap=cmap))
     cbar.ax.set_ylabel('Elapsed time (s)')
 
-    name = P(folder).joinpath('combined_' + tag + '.dat')
-    fitname = P(folder).joinpath('combined_' + tag + '_fits.dat')
-    fitparamname = P(folder).joinpath('combined_' + tag + '_fitparams.txt')
-    peakname = P(folder).joinpath('combined_' + tag + '_peaks.txt')
+    name = P(filename).parent.joinpath(P(filename).stem + '_combined.dat')
+    fitname = P(filename).parent.joinpath(P(filename).stem + '_combined_fits.dat')
+    fitparamname = P(filename).parent.joinpath(P(filename).stem + '_combined_fitparams.txt')
+    peakname = P(filename).parent.joinpath(P(filename).stem + '_combined_peaks.txt')
 
     if not (name.exists() and fitname.exists()) or makenew:
-        d = pd.read_csv(P(files[0]),
-                        # skiprows=1,
-                        sep=',',
-                        on_bad_lines='skip',
-                        engine='python',)
-
-        if deconvolved:
-            B = d['B'].to_numpy()
-        else:
-            coil = 0.21
-            amplitude = 159
-            freq = 70e3
-            t = d['time'].to_numpy()
-            B = coil * amplitude * np.sin(2 * np.pi * freq * t + np.pi)
-
-        loopdata = np.empty((len(B), len(files) + 1))
-        fitdata = np.empty((len(B), len(files) + 1))
-        peakdata = np.empty((len(files), 2))
+        B = dat['B']
+        loopdata = np.empty((len(B), len(cols) + 1))
+        fitdata = np.empty((len(B), len(cols) + 1))
+        peakdata = np.empty((len(cols), 2))
         loopdata[:, 0] = B
         fitdata[:, 0] = B
         fitparams = {}
         fitparams['B'] = list(B)
         peakdata[:, 0] = ts
 
-        for i, f in enumerate(files):
-            d = pd.read_csv(P(files[i]),
-                            # skiprows=1,
-                            sep=',',
-                            on_bad_lines='skip',
-                            engine='python',)
-
-            if deconvolved:
-                try:
-                    M = np.array([ast.literal_eval(ii) for ii in d['M']])
-                except KeyError:
-                    M = d['abs'].to_numpy()
-            else:
-                M = np.array([ast.literal_eval(ii) for ii in d['avg']])
+        for i, c in enumerate(cols):
+            M = dat[c].to_numpy()
 
             peakdata[i, 1] = np.max(np.real(M))
             try:
                 popt, pcov = cf(lorentzian, B, np.real(M), p0=[
-                                np.min(np.real(M)), np.max(np.real(M)), 5, 5])
+                                np.min(np.real(M)), np.max(np.real(M)), B[np.argmax(np.real(M))], 5])
                 fity = lorentzian(B, *popt)
+                # popt, pcov = cf(gaussian, B, np.real(M), p0=[
+                #                 np.min(np.real(M)), np.max(np.real(M)), B[np.argmax(np.real(M))], 5])
+                # fity = gaussian(B, *popt)
                 pk2pk = np.abs(B[np.argmin(np.diff(fity))] - B[np.argmax(np.diff(fity))])
                 out = list(popt) + [pk2pk]
                 fitdata[:, i + 1] = fity
-                fitparams[f.name + '_popt'] = repr(list(out))
-                fitparams[f.name + '_pcov'] = repr(list(np.sqrt(np.diag(pcov))))
+                fitparams[str(c) + '_popt'] = repr(list(out))
+                fitparams[str(c) + '_pcov'] = repr(list(np.sqrt(np.diag(pcov))))
             except RuntimeError:
                 pass
 
@@ -127,7 +91,7 @@ def process(folder, plotfields, deconvolved=True, makenew=False, showfits=True):
             #     loopdata[:, i+1] = np.real(M)[:len(B)]
             # except ValueError:
             #     loopdata[:, i+1] = np.pad(np.real(M), (0, len(B)-len(np.real(M))), 'constant', constant_values=(0, 0))
-            statusBar((i + 1) / len(files) * 100)
+            statusBar((i + 1) / len(cols) * 100)
         np.savetxt(name, loopdata)
         np.savetxt(fitname, fitdata)
         np.savetxt(peakname, peakdata)
@@ -164,7 +128,7 @@ def process(folder, plotfields, deconvolved=True, makenew=False, showfits=True):
     ax.set_ylabel('Signal (arb. u)')
     ax.set_xlabel('Field (G)')
     ax.set_ylim([mn, 1.05])
-    text = ax.text(1 / 2 * plotfields[1], 0.9, f'$t={ts[0]:.2f}$ s')
+    text = ax.text(plotfields[0] + 0.7 * (plotfields[1] - plotfields[0]), 0.9, f'$t={ts[0]:.2f}$ s')
 
     def animate(i):
         y = loopdata[x1:x2, i][l:h] / mx
@@ -178,21 +142,23 @@ def process(folder, plotfields, deconvolved=True, makenew=False, showfits=True):
 
         return line
 
-    # return tstep, tag, FuncAnimation(fig, animate, range(2, np.shape(loopdata)[1]), interval=1e3*tstep, repeat_delay=250)
-
-    return tstep, tag, FuncAnimation(fig, animate, range(2, np.shape(loopdata)[1]), interval=100, repeat_delay=250)
+    return tstep, FuncAnimation(fig, animate, range(2, np.shape(loopdata)[1], 50), interval=100, repeat_delay=250)
+    return tstep, 0
 
 
 if __name__ == "__main__":
-    folder = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/10/17/old way'
-    if P(folder).is_file():
-        folder = P(folder).parent
-    plotfields = (-45, 45)
-    tstep, tag, ani = process(
-        folder, plotfields, deconvolved=True, makenew=True, showfits=True)
-    ani.save(P(folder).joinpath(tag + '_animation.gif'),
-             dpi=400, writer=PillowWriter(fps=1 / (tstep)))
-    ani.save(P(folder).joinpath(tag + '_animationFAST.gif'),
+    filename = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/10/26/130mA_on15s_off165s_32000avgs_onefileDecon.dat'
+    plotfields = (-100, 100)
+    tstep, ani = process(
+        filename, plotfields, deconvolved=True, makenew=True, showfits=True)
+    # ani.save(P(filename).parent.joinpath('animation.gif'),
+    #          dpi=400, writer=PillowWriter(fps=1 / (tstep)))
+    ani.save(P(filename).parent.joinpath('animationFAST.gif'),
              dpi=400, writer=PillowWriter(fps=10))
-    plotfits(folder, FIT_T=10)
+    try:
+        FIT_T = float(''.join([kk for kk in ''.join([ii for ii in P(filename).stem.split('_') if 'on' in ii]) if (isdigit(kk) or kk=='.')]))
+    except ValueError:
+        FIT_T = 5
+    FIT_T=1
+    plotfits(P(filename).parent.joinpath(P(filename).stem + '_combined_fitparams.txt'), FIT_T=FIT_T) # FIT_T is the time where fitting begins (light off)
     # plt.show()

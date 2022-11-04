@@ -38,7 +38,21 @@ def lorentzian(x, c, A, x0, b):
     :param b: width
     """
 
-    return c + A / np.pi * b / 2 / ((x - x0)**2 + (b / 2) ** 2)
+    return c + A / np.pi * b / 2 / ((x - x0)**2 + (b / 2)**2)
+
+
+def gaussian(x, c, A, x0, b):
+    """lorentzian.
+
+    :param x: x-axis values
+    :param c: baseline
+    :param A: amplitude
+    :param x0: center
+    :param b: width
+    """
+
+    return c + A / (b * np.sqrt(2 * np.pi)) * np.exp(-1 / 2 *
+                                                     ((x - x0) / b)**2)
 
 
 def linfit(x, a, b):
@@ -46,19 +60,21 @@ def linfit(x, a, b):
 
 
 def lindrive(R, t):
-    return np.exp(-1j * R / 2 * t ** 2)
+    return np.exp(-1j * R / 2 * t**2)
 
 
 GAMMA = -1.7608e7  # rad / sG
 
 
-def sindrive(Bpp, f, t, Bphase=-np.pi/2):
+def sindrive(Bpp, f, t, Bphase=-np.pi / 2):
     # This is for phi=-np.pi/2 and t=0 at start of scan from Tseytlin 2020 eqn 28
     # Somehow require an extra negative here as compared to the paper but it works now anyway
-    return np.exp(-1j * GAMMA * Bpp * np.sin(np.pi * f * t) * np.sin(np.pi * f * t + Bphase) / (2 * np.pi * f))
+
+    return np.exp(-1j * GAMMA * Bpp * np.sin(np.pi * f * t) *
+                  np.sin(np.pi * f * t + Bphase) / (2 * np.pi * f))
 
 
-def deconvolve(filename, coil, amplitude, frequency, Bphase=-np.pi/2):
+def deconvolve(filename, coil, amplitude, frequency, Bphase=-np.pi / 2):
     try:
         d = pd.read_csv(filename)
         t = d['time'].to_numpy()
@@ -109,13 +125,18 @@ def deconvolve(filename, coil, amplitude, frequency, Bphase=-np.pi/2):
     f = np.fft.fftshift(np.fft.fftfreq(n, t[1] - t[0]))
     B = -f * 2 * np.pi / GAMMA
 
-    return B, M/Phi
+    return B, M / Phi
     # return plott, r
     # return plott, plotB
 
 
-
-def main(filename, coil, amplitude, frequency, plotfield, Bphase=-1 / 2 * np.pi, Mphase=0):
+def main(filename,
+         coil,
+         amplitude,
+         frequency,
+         plotfield,
+         Bphase=-1 / 2 * np.pi,
+         Mphase=0):
     c = 3
     # fig, ax = plt.subplots(figsize=(8, 6))
 
@@ -196,17 +217,32 @@ def main(filename, coil, amplitude, frequency, plotfield, Bphase=-1 / 2 * np.pi,
         pass
     # y -= np.mean(y)
     # y /= np.max(np.abs(y))
-    ax.plot(x[np.abs(x) < plotfield], np.imag(
-        y[np.abs(x) < plotfield]), lw=2, c='green', label='Dispersion')
-    ax.plot(x[np.abs(x) < plotfield], np.real(
-        y[np.abs(x) < plotfield]), lw=2, c='black', label='Absorption')
+    ax.plot(x[np.abs(x) < plotfield],
+            np.imag(y[np.abs(x) < plotfield]),
+            lw=2,
+            c='green',
+            label='Dispersion')
+    ax.plot(x[np.abs(x) < plotfield],
+            np.real(y[np.abs(x) < plotfield]),
+            lw=2,
+            c='black',
+            label='Absorption')
     try:
-        popt, pcov = cf(lorentzian, x[np.abs(x) < plotfield], np.real(
-            y)[np.abs(x) < plotfield], p0=[np.min(np.real(y)), np.max(np.real(y)), 10, 6])
+        popt, pcov = cf(lorentzian,
+                        x[np.abs(x) < plotfield],
+                        np.real(y)[np.abs(x) < plotfield],
+                        p0=[np.min(np.real(y)),
+                            np.max(np.real(y)), 10, 6])
         fity = lorentzian(x[np.abs(x) < plotfield], *popt)
-        pk2pk = np.abs(x[np.abs(x) < plotfield][np.argmin(np.diff(fity))] - x[np.abs(x) < plotfield][np.argmax(np.diff(fity))])
-        ax.plot(x[np.abs(x) < plotfield], fity,
-                c='red', lw=2, ls='--', label=rf'Fit $\Gamma=$ {popt[-1]:.1f} G' + '\n' + f'pk2pk $=$ {pk2pk:.1f} G')
+        pk2pk = np.abs(x[np.abs(x) < plotfield][np.argmin(np.diff(fity))] -
+                       x[np.abs(x) < plotfield][np.argmax(np.diff(fity))])
+        ax.plot(x[np.abs(x) < plotfield],
+                fity,
+                c='red',
+                lw=2,
+                ls='--',
+                label=rf'Fit $\Gamma=$ {popt[-1]:.1f} G' + '\n' +
+                f'pk2pk $=$ {pk2pk:.1f} G')
     except RuntimeError:
         pass
     fig.legend(loc=(0.65, 0.7))
@@ -218,9 +254,14 @@ if __name__ == "__main__":
     coil = 0.57
     amplitude = 158  # mA
     frequency = 69e3
-    Bphase = -np.pi/2
+    Bphase = -np.pi / 2
     Mphase = 1.36 + np.pi
     plotfield = coil / 2 * amplitude  # G
-    main(FILENAME, coil, amplitude, frequency,
-         plotfield, Bphase=Bphase, Mphase=Mphase)
+    main(FILENAME,
+         coil,
+         amplitude,
+         frequency,
+         plotfield,
+         Bphase=Bphase,
+         Mphase=Mphase)
     plt.show()

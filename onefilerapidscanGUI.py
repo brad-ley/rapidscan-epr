@@ -17,11 +17,13 @@ from plotly import graph_objects as go
 from plotly.offline import iplot
 from scipy.integrate import cumtrapz, trapz
 from scipy.optimize import curve_fit as cf
-from scipy.signal import hilbert, savgol_filter, sawtooth, windows
+from scipy.signal import hilbert, sawtooth, windows, savgol_filter
+from filterReal import isdigit
 
 from cycle import cycle
 from deconvolveRapidscan import GAMMA, sindrive
 from simulateRapidscan import Bloch
+from statusBar import statusBar
 
 cache = diskcache.Cache("./cache")
 long_callback_manager = DiskcacheLongCallbackManager(cache)
@@ -71,7 +73,8 @@ currently works, should be fixed on -np.pi/2
               Input('init', 'figure'),
               prevent_initial_call=False)
 def disable(_):
-    return True
+    # return True
+    return False
 
 
 @app.callback(Output('fit', 'figure'),
@@ -88,7 +91,7 @@ def plotfit(datajson, fitjson, trange):
             fig = px.line(d, x='time', y=['raw', 'fit'])
         else:
             d = pd.read_json(datajson, orient='split')
-            fig = px.line(d, x='time', y=' Y[0]')
+            fig = px.line(d, x='time', y=0)
         fig.update_xaxes(range=np.array(trange) * 1e-6)
         fig.update_layout(margin=margin)
     except:
@@ -103,38 +106,65 @@ def plotfit(datajson, fitjson, trange):
               State('filepath', 'value'),
               prevent_initial_call=True)
 def save(_, phasedjson, filepath):
-    try:
+    # try:
+    if True:
         d = pd.read_json(phasedjson, orient='split')
-        d.to_csv(P(filepath).parent.joinpath(P(filepath).stem + '_decon.dat'))
-    except ValueError:
-        pass
-
+        d.to_csv(P(filepath).parent.joinpath(P(filepath).stem + '_onefileDecon.dat'))
+    # except ValueError:
+    #     pass
+    
     return ''
 
 
 @app.callback(Output('dummy', 'data'), Input('batch', 'n_clicks'),
               State('coil', 'value'), State('amp', 'value'),
               State('freq', 'value'), State('bphase', 'value'),
-              State('filepath', 'value'), State('addpi', 'n_clicks'),
-              State('sigphase', 'value'), State('curphase', 'data'))
-def batch(_, coil, amp, freq, bphase, filepath, addpi_n, sigphase, curphi):
+              State('file', 'data'), State('filepath', 'value'),
+              State('addpi', 'n_clicks'), State('sigphase', 'value'),
+              State('curphase', 'data'), State('endtime', 'data'), State('skiprows', 'data'), State('averages', 'value'))
+def batch(_, coil, amp, freq, bphase, datajson, filepath, addpi_n, sigphase,
+          curphi, endtime, skiprows, averages):
     try:
-        # if True:
-        fs = [
-            ii for ii in P(filepath).parent.iterdir()
-            if ii.name.endswith('s.dat')
-        ]
+        if 'acq' in P(filepath).stem:
+            duration = float(''.join([ii for ii in ''.join([kk for kk in P(filepath).stem.split('_') if 'acq' in kk]) if isdigit(ii)]))
+        elif 'on' in P(filepath).stem:
+            on = float(''.join([ii for ii in ''.join([kk for kk in P(filepath).stem.split('_') if 'on' in kk]) if isdigit(ii)]))
+            off = float(''.join([ii for ii in ''.join([kk for kk in P(filepath).stem.split('_') if 'off' in kk]) if isdigit(ii)]))
+            duration = on + off
+        d = pd.read_csv(filepath, skiprows=skiprows, header=None)
+        # t = d[d.columns[0]]
+        # d = d.drop(d.columns[0], axis=1)
+        n = d.to_numpy()
+        # duration = np.max(t) - np.min(t)
+        times = np.linspace(0, duration, d.shape[0])
+        d['times'] = times
+        dat = d.loc[:, d.columns != 'times'].transpose()
+        t = np.linspace(0, 2e-9 * len(dat), len(dat))
+        dat['time'] = t
 
-        for f in fs:
-            d = pd.read_csv(f, skiprows=4)
-            t = np.linspace(0, 2e-9 * len(d['time']), len(d['time']))
-            d['time'] = t
-            datajson = d.to_json(orient='split')
-            outjson = decon(datajson, coil, amp, freq, bphase)
+        # dat = pd.read_json(datajson, orient='split')
+        decondat = {}
+        t = dat['time']
+
+        cols = [ii for ii in dat.columns if ii != 'time']
+        endtime = ( len(cols) * averages ) / (freq * 1e3)
+        for i, d in enumerate(cols):
+            sendd = pd.DataFrame({'time': t, 0: dat[d]})
+            sendd = sendd.to_json(orient='split')
+            outjson = decon(sendd, coil, amp, freq, bphase)
             temp = pd.read_json(outjson, orient='split')
             _, outd, _, _ = phase(0, addpi_n, sigphase, outjson, curphi)
             temp = pd.read_json(outd, orient='split')
-            save(0, outd, f)
+            # decondat[str(d) + ' disp'] = temp['disp']
+            decondat[str(d) + ' abs'] = temp['abs']
+            statusBar((i + 1)/ len(cols) * 100)
+        decondat['B'] = temp['B']
+        decondat = pd.DataFrame(decondat)
+        nums = len([ii for ii in decondat.columns if 'abs' in ii])
+        times = np.linspace(0, endtime, nums)
+        P(filepath).parent.joinpath('times.txt').write_text(repr(list(times)))
+        decondat = decondat.to_json(orient='split')
+        save(0, decondat, filepath)
     except (KeyError, ValueError):
         pass
 
@@ -220,7 +250,7 @@ def fit(_, datajson, coil, amplitude, freq, bphase, trange):
         # if True:
         data = pd.read_json(datajson, orient='split')
         t = data['time'].to_numpy()
-        y = data[' Y[0]'].to_numpy()
+        y = data[0].to_numpy()
         y -= np.mean(y)
         y /= np.max(y)
 
@@ -274,7 +304,6 @@ def decon(datajson, coil, amplitude, freq, bphase):
     freq = freq * 1e3
     outd = pd.DataFrame()
     try:
-
         # print(ctx.triggered_id)
         # if 'fitdata' == ctx.triggered_id:
         #     d = pd.read_json(fitjson, orient='split')
@@ -283,7 +312,7 @@ def decon(datajson, coil, amplitude, freq, bphase):
         # elif 'file' == ctx.triggered_id:
         d = pd.read_json(datajson, orient='split')
         t = d['time'].to_numpy()
-        sig = d[' Y[0]'].to_numpy(dtype='complex128')
+        sig = d[0].to_numpy(dtype='complex128')
 
         t -= np.min(t)
         im = -1 * np.imag(hilbert(np.abs(sig)))
@@ -296,19 +325,19 @@ def decon(datajson, coil, amplitude, freq, bphase):
 
         r = sig * drive
         n = len(r)
-        window = windows.blackman(len(r))
-        window = np.ones(len(r))
+        # window = np.ones(n)
+        window = windows.blackman(n)
 
         M = np.fft.fftshift(np.fft.fft(r * window, n=n))
         Phi = np.fft.fftshift(np.fft.fft(drive, n=n))
         f = np.fft.fftshift(np.fft.fftfreq(n, t[1] - t[0]))
         B = -f * 2 * np.pi / GAMMA
 
+        # res = M
         res = M / Phi
-        n = 31
-        o = 2
-        res = savgol_filter(np.real(res), n, o) + 1j * \
-            savgol_filter(np.imag(res), n, o)
+        w = 31
+        p = 2
+        # res = savgol_filter(np.real(res), w, p) + 1j * savgol_filter(np.imag(res), w, p)
         # res *= np.exp(1j * (sigphase + n_clicks * (np.pi/2)))
 
         outd['B'] = B[np.abs(B) < 1 / 2 * amplitude * coil]
@@ -334,25 +363,53 @@ def decon(datajson, coil, amplitude, freq, bphase):
               Output('file', 'data'),
               Output('timerange', 'min'),
               Output('timerange', 'max'),
+              Output('skiprows', 'data'),
               Input('filepath', 'value'),
               prevent_initial_call=False)
 def parse_contents(filepath):
     d = pd.DataFrame()
+    dat = pd.DataFrame()
+    firstrun = pd.DataFrame()
     tmin = dash.no_update
     tmax = dash.no_update
+    skiprows = dash.no_update
     try:
-        d = pd.read_csv(filepath, skiprows=4)
-        t = np.linspace(0, 2e-9 * len(d['time']), len(d['time']))
-        d['time'] = t
-        dat = d[' Y[0]'].to_numpy()
+    # if True:
+        skiprows = 0
+        h = [
+            x for i, x in enumerate(P(filepath).read_text().split('\n'))
+            if i < skiprows
+        ]
+        if 'acq' in P(filepath).stem:
+            duration = float(''.join([ii for ii in ''.join([kk for kk in P(filepath).stem.split('_') if 'acq' in kk]) if isdigit(ii)]))
+        elif 'on' in P(filepath).stem:
+            on = float(''.join([ii for ii in ''.join([kk for kk in P(filepath).stem.split('_') if 'on' in kk]) if isdigit(ii)]))
+            off = float(''.join([ii for ii in ''.join([kk for kk in P(filepath).stem.split('_') if 'off' in kk]) if isdigit(ii)]))
+            duration = on + off
+        else:
+            duration = np.array(0)
+        d = pd.read_csv(filepath, skiprows=skiprows, header=None)
+        # t = d[d.columns[0]]
+        # d = d.drop(d.columns[0], axis=1)
+        n = d.to_numpy()
+        # duration = np.max(t) - np.min(t)
+        times = np.linspace(0, duration, d.shape[0])
+        d['times'] = times
+        dat = d.loc[:, d.columns != 'times'].transpose()
+        t = np.linspace(0, 2e-9 * len(dat), len(dat))
+        dat['time'] = t
 
         tmin = np.min(t) * 1e6
         tmax = np.max(t) * 1e6
 
-        fig = px.line(d, x='time', y=' Y[0]')
+        fig = px.line(dat, x='time', y=0)
         fig.update_layout(margin=margin)
 
         h = html.Div(f"Loaded {P(filepath).name}", style={'color': 'green'})
+        firstrun['time'] = dat['time']
+        firstrun[0] = dat[dat.columns[0]]
+    # try:
+    #     pass
     except (FileExistsError, FileNotFoundError):
         # except TypeError:
 
@@ -367,17 +424,17 @@ def parse_contents(filepath):
         fig = make_fig()
     except OSError:
         # except TypeError:
-        h = html.Div('Enter file', style={'color': 'red'})
+        h = html.Div('Enter file above', style={'color': 'black'})
 
         fig = make_fig()
 
     except KeyError:
-        # except TypeError:
+    # except TypeError:
         h = html.Div("Ensure file ends in 's.dat'", style={'color': 'red'})
 
         fig = make_fig()
 
-    return h, fig, d.to_json(orient='split'), tmin, tmax
+    return h, fig, firstrun.to_json(orient='split'), tmin, tmax, skiprows
 
 
 app.layout = html.Div(
@@ -412,9 +469,9 @@ app.layout = html.Div(
                         [
                             dcc.Slider(
                                 0.20,
-                                1.20,
+                                2.0,
                                 id='coil',
-                                value=0.57,
+                                value=0.9,
                                 marks=None,
                                 tooltip={
                                     "placement": "right",
@@ -445,7 +502,7 @@ app.layout = html.Div(
                                 50,
                                 200,
                                 id='amp',
-                                value=156,
+                                value=133,
                                 marks=None,
                                 tooltip={
                                     "placement": "right",
@@ -476,7 +533,7 @@ app.layout = html.Div(
                                 20,
                                 100,
                                 id='freq',
-                                value=70,
+                                value=31.5,
                                 marks=None,
                                 tooltip={
                                     "placement": "right",
@@ -596,7 +653,7 @@ app.layout = html.Div(
                                 min=0,
                                 max=20,
                                 id='timerange',
-                                value=[2, 5],
+                                value=[5, 15],
                                 marks=None,
                                 tooltip={
                                     "placement": "right",
@@ -615,7 +672,7 @@ app.layout = html.Div(
                     [
                         html.Div(["Path:"],
                                  style={
-                                     'width': '57px',
+                                     'width': '8%',
                                      'display': 'inline-block'
                                  }),
                         dcc.Input(
@@ -623,7 +680,27 @@ app.layout = html.Div(
                             value='',
                             type='text',
                             style={
-                                'width': '78.5%',
+                                'width': '52.5%',
+                                'height': '50px',
+                                # 'lineHeight': '50px',
+                                'borderWidth': '1px',
+                                'borderStyle': 'line',
+                                'borderRadius': '5px',
+                                'textAlign': 'left',
+                                'margin': '0px 2% 10px 0%',
+                                'display': 'inline-block'
+                            }),
+                        html.Div(["Averages:"],
+                                 style={
+                                     'width': '12%',
+                                     'display': 'inline-block'
+                                 }),
+                        dcc.Input(
+                            id='averages',
+                            value=500,
+                            type='number',
+                            style={
+                                'width': '13%',
                                 'height': '50px',
                                 # 'lineHeight': '50px',
                                 'borderWidth': '1px',
@@ -677,6 +754,8 @@ app.layout = html.Div(
         dcc.Store(id='fitdata'),
         dcc.Store(id='phased'),
         dcc.Store(id='curphase'),
+        dcc.Store(id='endtime'),
+        dcc.Store(id='skiprows'),
         dcc.Store(id='dummy'),
         dcc.Store(id='dummy2'),
     ],
