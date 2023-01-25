@@ -27,8 +27,6 @@ plt.rcParams['ytick.minor.width'] = 1
 plt.rcParams['lines.linewidth'] = 2
 lw = 2
 
-
-
 import ast
 import os
 from pathlib import Path as P
@@ -76,6 +74,6 @@ def main(filename):
 
 
 if __name__ == "__main__":
-    filename = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/19/156mA_t=2682.420s.dat'
+    filename = ''
     main(filename)
     plt.show()

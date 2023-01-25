@@ -250,7 +250,7 @@ def main(filename,
 
 
 if __name__ == "__main__":
-    FILENAME = ''
+    FILENAME = '/Volumes/GoogleDrive/My Drive/Research/Data/2023/1/12/SSH FM middle/M01_RS_0avgs.dat'
     coil = 0.57
     amplitude = 158  # mA
     frequency = 69e3
