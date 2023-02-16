@@ -35,29 +35,49 @@ plt.rcParams['ytick.minor.width'] = 1
 plt.rcParams['lines.linewidth'] = 2
 
 
-def process(folder, plotfields, deconvolved=True, makenew=False, showfits=True):
-    fig, ax = plt.subplots(figsize=(8, 6))
+def process(folder,
+            plotfields,
+            ontimes=(0, -1),
+            deconvolved=True,
+            makenew=False,
+            showfits=True):
+    # fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots()
 
     if deconvolved:
         tag = 'deconvolved'
-        files = [ii for ii in P(folder).iterdir()
-                 if ii.name.endswith('slowscan.dat')]
+        files = [
+            ii for ii in P(folder).iterdir()
+            if ii.name.endswith('slowscan.dat')
+        ]
 
         if not files:
-            files = [ii for ii in P(folder).iterdir()
-                     if ii.name.endswith('decon.dat')]
+            files = [
+                ii for ii in P(folder).iterdir()
+                if ii.name.endswith('decon.dat')
+            ]
     else:
         tag = 'filtered'
-        files = [ii for ii in P(folder).iterdir()
-                 if ii.name.endswith('Magnitude.dat')]
-    files.sort(key=lambda x: float(''.join([xx for xx in [ii for ii in P(
-        x).stem.split('_') if 't=' in ii][0] if (isdigit(xx) or xx == '.')])))
-    times = [float(''.join([ii for ii in [ll for ll in P(bb).stem.split(
-        '_') if 't=' in ll][0] if (isdigit(ii) or ii == '.')])) for bb in files]
+        files = [
+            ii for ii in P(folder).iterdir()
+            if ii.name.endswith('Magnitude.dat')
+        ]
+    files.sort(key=lambda x: float(''.join([
+        xx for xx in [ii for ii in P(x).stem.split('_') if 't=' in ii][0]
+        if (isdigit(xx) or xx == '.')
+    ])))
+    times = [
+        float(''.join([
+            ii for ii in [ll for ll in P(bb).stem.split('_') if 't=' in ll][0]
+            if (isdigit(ii) or ii == '.')
+        ])) for bb in files
+    ]
     tstep = np.mean(np.diff(times))
     ts = np.insert(np.diff(times), 0, 0)
     ts = cumtrapz(ts)
     ts = np.insert(ts, 0, 0)
+    ti = ts[np.argmin(np.abs(ts - ontimes[0]))]
+    tf = ts[np.argmin(np.abs(ts - ontimes[1]))]
 
     cmap = mpl.cm.get_cmap('cool', len(files))
     norm = mpl.colors.Normalize(vmin=0, vmax=len(files) * tstep)
@@ -70,11 +90,13 @@ def process(folder, plotfields, deconvolved=True, makenew=False, showfits=True):
     peakname = P(folder).joinpath('combined_' + tag + '_peaks.txt')
 
     if not (name.exists() and fitname.exists()) or makenew:
-        d = pd.read_csv(P(files[0]),
-                        # skiprows=1,
-                        sep=',',
-                        on_bad_lines='skip',
-                        engine='python',)
+        d = pd.read_csv(
+            P(files[0]),
+            # skiprows=1,
+            sep=',',
+            on_bad_lines='skip',
+            engine='python',
+        )
 
         if deconvolved:
             B = d['B'].to_numpy()
@@ -95,11 +117,13 @@ def process(folder, plotfields, deconvolved=True, makenew=False, showfits=True):
         peakdata[:, 0] = ts
 
         for i, f in enumerate(files):
-            d = pd.read_csv(P(files[i]),
-                            # skiprows=1,
-                            sep=',',
-                            on_bad_lines='skip',
-                            engine='python',)
+            d = pd.read_csv(
+                P(files[i]),
+                # skiprows=1,
+                sep=',',
+                on_bad_lines='skip',
+                engine='python',
+            )
 
             if deconvolved:
                 try:
@@ -111,14 +135,20 @@ def process(folder, plotfields, deconvolved=True, makenew=False, showfits=True):
 
             peakdata[i, 1] = np.max(np.real(M))
             try:
-                popt, pcov = cf(lorentzian, B, np.real(M), p0=[
-                                np.min(np.real(M)), np.max(np.real(M)), 5, 5])
+                popt, pcov = cf(
+                    lorentzian,
+                    B,
+                    np.real(M),
+                    p0=[np.min(np.real(M)),
+                        np.max(np.real(M)), 5, 5])
                 fity = lorentzian(B, *popt)
-                pk2pk = np.abs(B[np.argmin(np.diff(fity))] - B[np.argmax(np.diff(fity))])
+                pk2pk = np.abs(B[np.argmin(np.diff(fity))] -
+                               B[np.argmax(np.diff(fity))])
                 out = list(popt) + [pk2pk]
                 fitdata[:, i + 1] = fity
                 fitparams[f.name + '_popt'] = repr(list(out))
-                fitparams[f.name + '_pcov'] = repr(list(np.sqrt(np.diag(pcov))))
+                fitparams[f.name + '_pcov'] = repr(list(np.sqrt(
+                    np.diag(pcov))))
             except RuntimeError:
                 pass
 
@@ -143,8 +173,9 @@ def process(folder, plotfields, deconvolved=True, makenew=False, showfits=True):
         x1 = min(np.argmin(loopdata[:, 0]), np.argmax(loopdata[:, 0]))
         x2 = max(np.argmin(loopdata[:, 0]), np.argmax(loopdata[:, 0]))
 
-    vals = np.where(np.logical_and(
-        loopdata[x1:x2, 0] > plotfields[0], loopdata[x1:x2, 0] < plotfields[1]) == True)[0]
+    vals = np.where(
+        np.logical_and(loopdata[x1:x2, 0] > plotfields[0],
+                       loopdata[x1:x2, 0] < plotfields[1]) == True)[0]
     l = vals[0]
     h = vals[-1]
 
@@ -156,43 +187,73 @@ def process(folder, plotfields, deconvolved=True, makenew=False, showfits=True):
 
     x = loopdata[x1:x2, 0][l:h]
     y = loopdata[x1:x2, 1][l:h] / mx
-    line, = ax.plot(x, y, c=cmap(ts[0]))
+    line, = ax.plot(x, y, c=cmap(ts[0]), lw=2)
+
     if showfits:
         yy = fitdata[x1:x2, 1][l:h] / mx
-        fit, = ax.plot(x, yy,
-                       c=cmap(ts[0]), ls='--')
+        fit, = ax.plot(x, yy, c=cmap(ts[0]), ls='--', lw=2)
     ax.set_ylabel('Signal (arb. u)')
     ax.set_xlabel('Field (G)')
     ax.set_ylim([mn, 1.05])
-    text = ax.text(1 / 2 * plotfields[1], 0.9, f'$t={ts[0]:.2f}$ s')
+    text = ax.text(0.425,
+                   1.05,
+                   f'$t={ts[0]:.1f}$ s',
+                   transform=ax.transAxes)
 
     def animate(i):
         y = loopdata[x1:x2, i][l:h] / mx
         line.set_ydata(y)
         line.set_color(cmap(ts[i - 1] / np.max(ts)))
+        # print(ts[i-1], ti, tf)
+
+        if np.logical_and(ts[i - 1] >= ti, ts[i - 1] <= tf):
+            ax.set_facecolor('#00A7CA')
+            ax.set_alpha(0.25)
+        else:
+            ax.set_facecolor('none')
+
         if showfits:
             yy = fitdata[x1:x2, i][l:h] / mx
             fit.set_ydata(yy)
             fit.set_color(cmap(ts[i - 1] / np.max(ts)))
-        text.set_text(f'$t={ts[i-1]:.2f}$ s')
+        text.set_text(f'$t={ts[i-1]:.1f}$ s')
 
         return line
 
     # return tstep, tag, FuncAnimation(fig, animate, range(2, np.shape(loopdata)[1]), interval=1e3*tstep, repeat_delay=250)
 
-    return tstep, tag, FuncAnimation(fig, animate, range(2, np.shape(loopdata)[1]), interval=100, repeat_delay=250)
+    fig.tight_layout()
+
+    return tstep, tag, FuncAnimation(fig,
+                                     animate,
+                                     range(2,
+                                           np.shape(loopdata)[1]),
+                                     interval=100,
+                                     repeat_delay=250)
 
 
 if __name__ == "__main__":
-    folder = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/10/17/old way'
+    folder = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/2/14'
+    plotfields = (-30, 45)
+    ontimes = (14, 44)
+
     if P(folder).is_file():
         folder = P(folder).parent
-    plotfields = (-45, 45)
-    tstep, tag, ani = process(
-        folder, plotfields, deconvolved=True, makenew=True, showfits=True)
-    ani.save(P(folder).joinpath(tag + '_animation.gif'),
-             dpi=400, writer=PillowWriter(fps=1 / (tstep)))
-    ani.save(P(folder).joinpath(tag + '_animationFAST.gif'),
-             dpi=400, writer=PillowWriter(fps=10))
-    plotfits(folder, FIT_T=10)
+    tstep, tag, ani = process(folder,
+                              plotfields,
+                              ontimes=ontimes,
+                              deconvolved=True,
+                              makenew=False,
+                              showfits=True)
+    ani.save(
+        P(folder).joinpath(tag + '_animation.gif'),
+        dpi=400,
+        writer=PillowWriter(fps=1 / (tstep)),
+    )
+    ani.save(
+        P(folder).joinpath(tag + '_animationFAST.gif'),
+        dpi=400,
+        writer=PillowWriter(fps=10),
+    )
+    plotfits(folder, ontimes)
     # plt.show()
