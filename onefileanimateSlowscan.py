@@ -2,6 +2,7 @@ import ast
 import os
 from pathlib import Path as P
 from pathlib import PurePath as PP
+from tqdm import tqdm
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -57,9 +58,10 @@ def process(
     ti = ts[np.argmin(np.abs(ts - ontimes[0]))]
     tf = ts[np.argmin(np.abs(ts - ontimes[1]))]
 
-    cmap = mpl.cm.get_cmap('cool', len(cols))
+    cmap = plt.get_cmap('cool')
     norm = mpl.colors.Normalize(vmin=0, vmax=len(cols) * tstep)
-    cbar = plt.colorbar(mappable=mpl.cm.ScalarMappable(norm=norm, cmap=cmap))
+    cbar = plt.colorbar(mappable=mpl.cm.ScalarMappable(norm=norm, cmap=cmap),
+                        ax=ax)
     cbar.ax.set_ylabel('Elapsed time (s)')
 
     name = P(filename).parent.joinpath(P(filename).stem + '_combined.dat')
@@ -89,7 +91,8 @@ def process(
         fitparams['B'] = list(B)
         peakdata[:, 0] = ts
 
-        for i, c in enumerate(cols):
+        for i in tqdm(range(0, len(cols))):
+            c = cols[i]
             M = dat[c].to_numpy()[l:h]
 
             peakdata[i, 1] = np.max(np.real(M))
@@ -97,11 +100,8 @@ def process(
                 popt, pcov = cf(lorentzian,
                                 B,
                                 M,
-                                p0=[
-                                    np.min(M),
-                                    np.max(M),
-                                    B[np.argmax(M)], 5
-                                ])
+                                p0=[np.min(M),
+                                    np.max(M), B[np.argmax(M)], 5])
                 fity = lorentzian(B, *popt)
                 # popt, pcov = cf(gaussian, B, np.real(M), p0=[
                 #                 np.min(np.real(M)), np.max(np.real(M)), B[np.argmax(np.real(M))], 5])
@@ -121,7 +121,7 @@ def process(
             #     loopdata[:, i+1] = np.real(M)[:len(B)]
             # except ValueError:
             #     loopdata[:, i+1] = np.pad(np.real(M), (0, len(B)-len(np.real(M))), 'constant', constant_values=(0, 0))
-            statusBar((i + 1) / len(cols) * 100)
+            # statusBar((i + 1) / len(cols) * 100)
         np.savetxt(name, loopdata)
         np.savetxt(fitname, fitdata)
         np.savetxt(peakname, peakdata)
@@ -140,7 +140,6 @@ def process(
     # loopdata[:, 1:] -= np.mean(loopdata[(x2 - x1) // 10:x2, 1])
     # fitdata[:, 1:] -= np.mean(fitdata[(x2 - x1) // 10:x2, 1])
 
-    
     x = loopdata[:, 0]
     y = loopdata[:, 1]
     mn = np.min(loopdata[:, 1:])
@@ -187,16 +186,19 @@ def process(
     return tstep, FuncAnimation(fig,
                                 animate,
                                 range(2,
-                                      np.shape(loopdata)[1]-1, 2),
+                                      np.shape(loopdata)[1] - 1, 2),
                                 interval=100,
                                 repeat_delay=250)
 
-    return tstep, 0
-
 
 if __name__ == "__main__":
-    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/2/15/M09_DA19.5_pre5s_on5s_off175s_10000avgs_filtered_onefileDecon.dat'
-    plotfields = (-30,10)
+    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/18/AsLOV2/tsweep/301.06/t1-301.06K-stable_pre30s_on10s_off230s_25000avgs_filtered.dat'
+
+    if not P(filename).stem.endswith('Decon'):
+        filename = P(filename).parent.joinpath(
+            P(filename).stem + '_oneFileDecon.dat')
+    plotfields = (-20, 20)
+    # plotfields = (-25,15)
     try:
         on = float(''.join([
             ii for ii in ''.join(
@@ -215,10 +217,9 @@ if __name__ == "__main__":
         ]))
         ontimes = (pre, pre + on)
     except ValueError:
-        ontimes = (5, 10)
-        ontimes = (0, 5)
+        ontimes = (0, 0)
         print(
-                f"Could not detect the experiment timings.\nDefaulting to ON at {ontimes[0]:.1f} s and OFF at {ontimes[1]:.1f} s."
+            f"Could not detect the experiment timings.\nDefaulting to ON at {ontimes[0]:.1f} s and OFF at {ontimes[1]:.1f} s."
         )
     tstep, ani = process(filename,
                          plotfields,
@@ -231,8 +232,7 @@ if __name__ == "__main__":
     ani.save(P(filename).parent.joinpath('animationFAST.gif'),
              dpi=400,
              writer=PillowWriter(fps=10))
-    plotfits(
-        P(filename).parent.joinpath(
-            P(filename).stem + '_combined_fitparams.txt'),
-        ontimes=ontimes)
+    plotfits(P(filename).parent.joinpath(
+        P(filename).stem + '_combined_fitparams.txt'),
+             ontimes=ontimes)
     # plt.show()

@@ -2,6 +2,7 @@ import base64
 import io
 from pathlib import Path as P
 from pathlib import PurePath as PP
+from tqdm import tqdm
 
 import matplotlib.pyplot as plt
 import dash
@@ -154,7 +155,8 @@ def batch(_, coil, amp, freq, bphase, datajson, filepath, addpi_n, sigphase,
 
         cols = [ii for ii in dat.columns if ii != 'time']
         endtime = ( len(cols) * averages ) / (freq * 1e3)
-        for i, d in enumerate(cols):
+        for i in tqdm(range(0, len(cols))):
+            d = cols[i]
             sendd = pd.DataFrame({'time': t, 0: dat[d]})
             sendd = sendd.to_json(orient='split')
             outjson = decon(sendd, coil, amp, freq, bphase)
@@ -163,7 +165,7 @@ def batch(_, coil, amp, freq, bphase, datajson, filepath, addpi_n, sigphase,
             temp = pd.read_json(outd, orient='split')
             # decondat[str(d) + ' disp'] = temp['disp']
             decondat[str(d) + ' abs'] = temp['abs']
-            statusBar((i + 1)/ len(cols) * 100)
+            # statusBar((i + 1)/ len(cols) * 100)
         decondat['B'] = temp['B']
         decondat = pd.DataFrame(decondat)
         nums = len([ii for ii in decondat.columns if 'abs' in ii])
@@ -346,7 +348,6 @@ def decon(datajson, coil, amplitude, freq, bphase):
         outd['abs'] = np.real(res)[np.abs(B) < 1 / 2 * amplitude * coil]
         outd['disp'] = np.imag(res)[np.abs(B) < 1 / 2 * amplitude * coil]
 
-        # print(d, outd)
         # outd['B'] = B
         # outd['abs'] = np.real(res)
         # outd['disp'] = np.imag(res)
