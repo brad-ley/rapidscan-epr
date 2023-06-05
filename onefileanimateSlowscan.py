@@ -192,13 +192,12 @@ def process(
 
 
 if __name__ == "__main__":
-    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/18/AsLOV2/tsweep/301.06/t1-301.06K-stable_pre30s_on10s_off230s_25000avgs_filtered.dat'
+    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/6/1/FMN sample/stable/279.5/M01_279.5K_101mA_stable_pre30s_on10s_off470s_25000avgs_filtered.dat'
 
     if not P(filename).stem.endswith('Decon'):
         filename = P(filename).parent.joinpath(
             P(filename).stem + '_oneFileDecon.dat')
     plotfields = (-20, 20)
-    # plotfields = (-25,15)
     try:
         on = float(''.join([
             ii for ii in ''.join(

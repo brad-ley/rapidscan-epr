@@ -329,8 +329,8 @@ def decon(datajson, coil, amplitude, freq, bphase):
 
         r = sig * drive
         n = len(r)
-        window = np.ones(n)
-        # window = windows.blackman(n)
+        # window = np.ones(n)
+        window = windows.blackman(n)
 
         M = np.fft.fftshift(np.fft.fft(r * window, n=n))
         Phi = np.fft.fftshift(np.fft.fft(drive, n=n))
@@ -338,7 +338,7 @@ def decon(datajson, coil, amplitude, freq, bphase):
         B = -f * 2 * np.pi / GAMMA
 
         # res = M
-        res = M / Phi
+        res = M / (Phi + np.max(Phi) * 1e-6)
         w = 31
         p = 2
         # res = savgol_filter(np.real(res), w, p) + 1j * savgol_filter(np.imag(res), w, p)
