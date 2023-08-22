@@ -4,6 +4,7 @@ from pathlib import Path as P
 from pathlib import PurePath as PP
 from dataclasses import dataclass
 from readDataFile import read
+from scipy.optimize import curve_fit
 
 import PIL
 import matplotlib.pyplot as plt
@@ -32,6 +33,14 @@ if __name__ == "__main__":
     plt.rcParams.update(dict(rcParams))
 
 
+def exp(x, a, b, T, c):
+    return a + b * np.exp(-(x - T) / c)
+
+
+def lin(x, a, b):
+    return a + b * x
+
+
 def main(filename):
     text = P(filename).read_text().strip()
     temp = np.array([float(ii.split(', ')[0])
@@ -40,22 +49,50 @@ def main(filename):
         [float(ii.split(', ')[1]) for ii in text.split('\n')[1:]])
     efficiency = np.array(
         [float(ii.split(', ')[2]) for ii in text.split('\n')[1:]])
+    times = np.array(
+        [float(ii.split(', ')[3]) for ii in text.split('\n')[1:]])
 
     fig, ax = plt.subplots(layout='constrained')
-    ax.set_ylabel('$\Delta \omega$ (G)')  # we already handled the x-label with ax1
-    ax.scatter(temp, depth, color='k')
+    # ax.set_ylabel('$\Delta \omega$ (G)')  # we already handled the x-label with ax1
+    ax.set_ylabel('$\Delta$Linewidth (G)')  # we already handled the x-label with ax1
+    tempsx = np.copy(temp)
+    tempsx += 273.15
+    # tempsx = np.append(tempsx, 165)
+    # depth = np.append(depth, 11)
+    po, pc = curve_fit(lin, tempsx, np.abs(depth))
+    smoothx = np.linspace(0, np.max(tempsx), 1000)
+    ax.plot(smoothx, lin(smoothx, *po), ls='--', c='r')
+    ax.scatter(tempsx, np.abs(depth), color='k')
 
-    color = 'tab:blue'
-    ax2 = ax.twinx()
-    ax2.scatter(temp, efficiency, c=color)
-    ax2.set_ylabel('\% change', color=color)
-    ax2.tick_params(axis='y', labelcolor=color)
+    # color = 'tab:blue'
+    # ax2 = ax.twinx()
+    # ax2.scatter(temp, efficiency, c=color)
+    # ax2.set_ylabel('\% change', color=color)
+    # ax2.tick_params(axis='y', labelcolor=color)
 
-    ax.set_xlabel('Temperature (C)')
+    ax.set_xlabel('Temperature ($^\circ$C)')
     fig.savefig(P(filename).parent.joinpath('EvT_scatter.png'), dpi=500)
+    f, a = plt.subplots(layout='constrained')
+    # ax.set_ylabel('$\Delta \omega$ (G)')  # we already handled the x-label with ax1
+    a.set_ylabel(r'Refolding $\tau$ (s)')  # we already handled the x-label with ax1
+    a.scatter(temp, times, color='k', label='Data')
+    popt, pcov = curve_fit(exp, temp, times, p0=[50, 50, 0, 10])
+    fitx = np.linspace(np.min(temp), np.max(temp), 1000)
+    # a.plot(fitx, exp(fitx, *popt), ls='--', c='r', label=rf'Fit $\Delta={popt[-1]:.1f}\,$K'+' $k_{B}$')
+    # a.legend()
+
+
+    # color = 'tab:blue'
+    # ax2 = ax.twinx()
+    # ax2.scatter(temp, efficiency, c=color)
+    # ax2.set_ylabel('\% change', color=color)
+    # ax2.tick_params(axis='y', labelcolor=color)
+
+    a.set_xlabel('Temperature ($^\circ$C)')
+    f.savefig(P(filename).parent.joinpath('TAUvT_scatter.png'), dpi=500)
 
 
 if __name__ == "__main__":
-    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/31/FMN sample/stable/LWfit_values.txt'
+    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/31/FMN sample/stable/LWfit_values copy.txt'
     main(filename)
     plt.show()

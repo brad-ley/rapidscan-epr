@@ -75,8 +75,8 @@ def makePlot(targ):
         dat = pd.read_csv(f.parent.joinpath(
             f.stem + '_onefileDecon.dat'), index_col='Unnamed: 0')
         pk = np.argmax(dat['abs'])
-        # dat['B'] -= dat['B'][pk]
-        dat['B'] -= -5.8
+        dat['B'] -= dat['B'][pk]
+        # dat['B'] -= -5.8
         # dat['abs'] -= i
         l = 0.5e-6
         h = 2.5e-6
@@ -135,8 +135,8 @@ def makePlot(targ):
         hh = 10e-6
 
     ptext = (0.075, 0.85)
-    ax.text(*ptext, 'a)', transform=ax.transAxes)
-    axin.text(*ptext, 'b)', transform=axin.transAxes)
+    ax.text(*ptext, 'A)', transform=ax.transAxes)
+    axin.text(*ptext, 'B)', transform=axin.transAxes)
     ax.set_ylim(bottom=0)
     P(targ).joinpath('SNR values.txt').write_text(outstr)
     # ax.indicate_inset_zoom(axinold, edgecolor="black")
@@ -159,6 +159,6 @@ def makePlot(targ):
 
 
 if __name__ == "__main__":
-    targ = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/5/forplot/'
+    targ = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/1/27/rapidscan/forplot'
     makePlot(targ)
     plt.show()

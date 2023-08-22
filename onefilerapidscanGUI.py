@@ -10,22 +10,22 @@ import diskcache
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import pyarrow.feather as feather
 from dash import ctx, dcc, html
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 from dash.long_callback import DiskcacheLongCallbackManager
-from joblib import Memory, Parallel, delayed
 from plotly import graph_objects as go
 from plotly.offline import iplot
 from scipy.integrate import cumtrapz, trapz
 from scipy.optimize import curve_fit as cf
 from scipy.signal import hilbert, sawtooth, windows, savgol_filter
+from scipy.special import jv
 from filterReal import isdigit
 
 from cycle import cycle
 from deconvolveRapidscan import GAMMA, sindrive
 from simulateRapidscan import Bloch
-from statusBar import statusBar
 
 cache = diskcache.Cache("./cache")
 long_callback_manager = DiskcacheLongCallbackManager(cache)
@@ -77,6 +77,7 @@ currently works, should be fixed on -np.pi/2
               prevent_initial_call=False)
 def disable(_):
     # return True
+
     return False
 
 
@@ -111,12 +112,20 @@ def plotfit(datajson, fitjson, trange):
               prevent_initial_call=True)
 def save(_, phasedjson, filepath):
     # try:
+
     if True:
         d = pd.read_json(phasedjson, orient='split')
-        d.to_csv(P(filepath).parent.joinpath(P(filepath).stem + '_onefileDecon.dat'))
+
+        if len(d.columns) <= 3:
+            add = '_onefileDecon'
+        else:
+            add = '_batchDecon'
+
+        d.to_feather(P(filepath).parent.joinpath(P(filepath).stem + add + '.feather'))
+        # d.to_csv(P(filepath).parent.joinpath(P(filepath).stem + add + '.dat'))
     # except ValueError:
     #     pass
-    
+
     return ''
 
 
@@ -125,16 +134,38 @@ def save(_, phasedjson, filepath):
               State('freq', 'value'), State('bphase', 'value'),
               State('file', 'data'), State('filepath', 'value'),
               State('addpi', 'n_clicks'), State('sigphase', 'value'),
-              State('curphase', 'data'), State('endtime', 'data'), State('skiprows', 'data'), State('averages', 'value'))
+              State('curphase', 'data'), State('endtime', 'data'),
+              State('skiprows', 'data'), State('averages', 'value'),
+              State('harmonic', 'value'), State('modfield', 'value'))
 def batch(_, coil, amp, freq, bphase, datajson, filepath, addpi_n, sigphase,
-          curphi, endtime, skiprows, averages):
+          curphi, endtime, skiprows, averages, harm, modfield):
     try:
         if 'acq' in P(filepath).stem:
-            duration = float(''.join([ii for ii in ''.join([kk for kk in P(filepath).stem.split('_') if 'acq' in kk]) if isdigit(ii)]))
+            duration = float(''.join([
+                ii for ii in ''.join(
+                    [kk for kk in P(filepath).stem.split('_') if 'acq' in kk])
+
+                if isdigit(ii)
+            ]))
         elif 'on' in P(filepath).stem:
-            on = float(''.join([ii for ii in ''.join([kk for kk in P(filepath).stem.split('_') if 'on' in kk]) if isdigit(ii)]))
-            off = float(''.join([ii for ii in ''.join([kk for kk in P(filepath).stem.split('_') if 'off' in kk]) if isdigit(ii)]))
-            pre = float(''.join([ii for ii in ''.join([kk for kk in P(filepath).stem.split('_') if 'pre' in kk]) if isdigit(ii)]))
+            on = float(''.join([
+                ii for ii in ''.join(
+                    [kk for kk in P(filepath).stem.split('_') if 'on' in kk])
+
+                if isdigit(ii)
+            ]))
+            off = float(''.join([
+                ii for ii in ''.join(
+                    [kk for kk in P(filepath).stem.split('_') if 'off' in kk])
+
+                if isdigit(ii)
+            ]))
+            pre = float(''.join([
+                ii for ii in ''.join(
+                    [kk for kk in P(filepath).stem.split('_') if 'pre' in kk])
+
+                if isdigit(ii)
+            ]))
             duration = on + off + pre
         D = pd.read_csv(filepath, skiprows=skiprows, header=None)
         # t = d[d.columns[0]]
@@ -154,16 +185,17 @@ def batch(_, coil, amp, freq, bphase, datajson, filepath, addpi_n, sigphase,
         t = dat['time']
 
         cols = [ii for ii in dat.columns if ii != 'time']
-        endtime = ( len(cols) * averages ) / (freq * 1e3)
+        endtime = (len(cols) * averages) / (freq * 1e3)
+
         for i in tqdm(range(0, len(cols))):
             d = cols[i]
             sendd = pd.DataFrame({'time': t, 0: dat[d]})
             sendd = sendd.to_json(orient='split')
-            outjson = decon(sendd, coil, amp, freq, bphase)
+            outjson = decon(sendd, coil, amp, freq, bphase, harm, modfield)
             # temp = pd.read_json(outjson, orient='split')
             _, outd, _, _ = phase(0, addpi_n, sigphase, outjson, curphi)
             temp = pd.read_json(outd, orient='split')
-            # decondat[str(d) + ' disp'] = temp['disp']
+            decondat[str(d) + ' disp'] = temp['disp']
             decondat[str(d) + ' abs'] = temp['abs']
             # statusBar((i + 1)/ len(cols) * 100)
         decondat['B'] = temp['B']
@@ -171,8 +203,9 @@ def batch(_, coil, amp, freq, bphase, datajson, filepath, addpi_n, sigphase,
         nums = len([ii for ii in decondat.columns if 'abs' in ii])
         times = np.linspace(0, endtime, nums)
         P(filepath).parent.joinpath('times.txt').write_text(repr(list(times)))
-        decondat = decondat.to_json(orient='split')
-        save(0, decondat, filepath)
+        savepath = P(filepath).parent.joinpath(P(filepath).stem + '_batchDecon.feather') 
+        decondat.to_feather(savepath)
+        # save(0, decondat, filepath)
     except (KeyError, ValueError):
         pass
 
@@ -201,7 +234,7 @@ def phase(auto_n, addpi_n, sigphase, datajson, curphi):
         res = d['abs'] + 1j * d['disp']
 
         if 'findphase' == ctx.triggered_id:
-            phis = np.linspace(0, 2 * np.pi, 720)
+            phis = np.linspace(0, 2 * np.pi, 1024)
             # o = [trapz(np.real(res * np.exp(1j * ii))) for ii in phis]
             o = [np.max(np.real(res * np.exp(1j * ii))) for ii in phis]
             # o = [trapz(np.imag(res * np.exp(1j * ii))) for ii in phis]
@@ -226,6 +259,7 @@ def phase(auto_n, addpi_n, sigphase, datajson, curphi):
 
         return fig, phased.to_json(orient='split'), phi, sigphase
 
+    # except IndexError:
     except KeyError:
         return dash.no_update, phased.to_json(orient='split'), phi, sigphase
 
@@ -308,8 +342,10 @@ def fit(_, datajson, coil, amplitude, freq, bphase, trange):
     Input('amp', 'value'),
     Input('freq', 'value'),
     Input('bphase', 'value'),
-)
-def decon(datajson, coil, amplitude, freq, bphase):
+    Input('harmonic', 'value'),
+    Input('modfield', 'value'),
+    )
+def decon(datajson, coil, amplitude, freq, bphase, harm, modfield):
     freq = freq * 1e3
     outd = pd.DataFrame()
     try:
@@ -328,25 +364,46 @@ def decon(datajson, coil, amplitude, freq, bphase):
         sig /= np.max(np.abs(sig))
 
         r = sig * drive
-        n = len(r)
-        # window = np.ones(n)
-        window = windows.blackman(n)
+        # n = 7 * len(r)
+        n = 1 * len(r)
+        # window = np.ones(len(r))
+        window = windows.blackman(len(r))
 
         M = np.fft.fftshift(np.fft.fft(r * window, n=n))
-        Phi = np.fft.fftshift(np.fft.fft(drive, n=n))
+        Phi = np.fft.fftshift(np.fft.fft(drive * window, n=n))
         f = np.fft.fftshift(np.fft.fftfreq(n, t[1] - t[0]))
         B = -f * 2 * np.pi / GAMMA
 
-        # res = M
-        res = M / (Phi + np.max(Phi) * 1e-6)
-        w = 31
-        p = 2
+        frac = 1 / 2
+        res = M[np.abs(B) < frac * amplitude * coil] / Phi[np.abs(B) < frac * amplitude * coil]
+
+        # outd['abs'] = np.real(M)
+        # outd['disp'] = np.imag(M)
+        B = B[np.abs(B) < frac * amplitude * coil]
+
+        if harm > 0:
+
+        # if False:
+        # pseudomodulation script from Brian R. Manning 2022
+            m = 1 * len(res)
+            L = np.max(B) - np.min(B)
+            w = np.linspace(-np.pi * m / L, np.pi * m / L, m)
+            J = jv(harm, w * modfield * len(res) /
+                   (2 * m))  # 0.8 G for LiPC, 3 G for Gd-TPATCN
+
+            cw = np.fft.fftshift(np.fft.fft(res, n=m))
+            cw *= J
+            CW = (1j)**harm / 2 * np.fft.ifft(
+                np.fft.ifftshift(cw * windows.blackman(len(cw))), n=m)
+            # end pseudomodulation
+            res = CW[(m - len(res)) // 2:(m - len(res)) // 2 + len(res)]
+
         # res = savgol_filter(np.real(res), w, p) + 1j * savgol_filter(np.imag(res), w, p)
         # res *= np.exp(1j * (sigphase + n_clicks * (np.pi/2)))
 
-        outd['B'] = B[np.abs(B) < 1 / 2 * amplitude * coil]
-        outd['abs'] = np.real(res)[np.abs(B) < 1 / 2 * amplitude * coil]
-        outd['disp'] = np.imag(res)[np.abs(B) < 1 / 2 * amplitude * coil]
+        outd['B'] = B
+        outd['abs'] = np.real(res)
+        outd['disp'] = np.imag(res)
 
         # outd['B'] = B
         # outd['abs'] = np.real(res)
@@ -357,7 +414,7 @@ def decon(datajson, coil, amplitude, freq, bphase):
         # fig = px.line(outd, x='B', y=['abs', 'disp'])
         # fig.update_layout(margin=margin)
 
-    except:  # general error handling
+    except TypeError:  # general error handling
         pass
 
     return outd.to_json(orient='split')
@@ -380,17 +437,34 @@ def parse_contents(filepath):
     tmax = dash.no_update
     skiprows = dash.no_update
     try:
-    # if True:
+        # if True:
         skiprows = 0
         h = [
             x for i, x in enumerate(P(filepath).read_text().split('\n'))
+
             if i < skiprows
         ]
+
         if 'acq' in P(filepath).stem:
-            duration = float(''.join([ii for ii in ''.join([kk for kk in P(filepath).stem.split('_') if 'acq' in kk]) if isdigit(ii)]))
+            duration = float(''.join([
+                ii for ii in ''.join(
+                    [kk for kk in P(filepath).stem.split('_') if 'acq' in kk])
+
+                if isdigit(ii)
+            ]))
         elif 'on' in P(filepath).stem:
-            on = float(''.join([ii for ii in ''.join([kk for kk in P(filepath).stem.split('_') if 'on' in kk]) if isdigit(ii)]))
-            off = float(''.join([ii for ii in ''.join([kk for kk in P(filepath).stem.split('_') if 'off' in kk]) if isdigit(ii)]))
+            on = float(''.join([
+                ii for ii in ''.join(
+                    [kk for kk in P(filepath).stem.split('_') if 'on' in kk])
+
+                if isdigit(ii)
+            ]))
+            off = float(''.join([
+                ii for ii in ''.join(
+                    [kk for kk in P(filepath).stem.split('_') if 'off' in kk])
+
+                if isdigit(ii)
+            ]))
             duration = on + off
         else:
             duration = np.array(0)
@@ -416,7 +490,8 @@ def parse_contents(filepath):
 
         h = html.Div(f"Loaded {P(filepath).name}", style={'color': 'green'})
         firstrun['time'] = dat['time']
-        firstrun[0] = dat[dat.columns[0]]
+        # firstrun[0] = dat[dat.columns[int(len(dat.columns)/2)]]
+        firstrun[0] = dat[dat.columns[1]]
     # try:
     #     pass
     except (FileExistsError, FileNotFoundError):
@@ -438,7 +513,7 @@ def parse_contents(filepath):
         fig = make_fig()
 
     except KeyError:
-    # except TypeError:
+        # except TypeError:
         h = html.Div("Ensure file ends in 's.dat'", style={'color': 'red'})
 
         fig = make_fig()
@@ -447,6 +522,7 @@ def parse_contents(filepath):
         avgs = float(''.join([
             ii for ii in ''.join(
                 [kk for kk in P(filepath).stem.split('_') if 'avgs' in kk])
+
             if isdigit(ii)
         ]))
     except TypeError:
@@ -494,7 +570,8 @@ app.layout = html.Div(
                                 tooltip={
                                     "placement": "right",
                                     "always_visible": True
-                                }, persistence=True,
+                                },
+                                persistence=True,
                             )
                         ],
                         style={
@@ -525,7 +602,8 @@ app.layout = html.Div(
                                 tooltip={
                                     "placement": "right",
                                     "always_visible": True
-                                }, persistence=True,
+                                },
+                                persistence=True,
                             )
                         ],
                         style={
@@ -548,15 +626,16 @@ app.layout = html.Div(
                     html.Div(
                         [
                             dcc.Slider(
-                                20,
-                                100,
+                                15,
+                                70,
                                 id='freq',
                                 value=31.5,
                                 marks=None,
                                 tooltip={
                                     "placement": "right",
                                     "always_visible": True
-                                }, persistence=True,
+                                },
+                                persistence=True,
                             )
                         ],
                         style={
@@ -566,37 +645,83 @@ app.layout = html.Div(
                         },
                     ),
                 ]),
-                html.Div([
-                    html.Div(
-                        [
-                            "B \u03d5 (rad):",
-                        ],
-                        style={
-                            'display': 'inline-block',
-                            'margin': '10px 0px 0px 30px',
-                            'width': '120px'
-                        }),
-                    html.Div(
-                        [
-                            dcc.Slider(
-                                -3 / 4 * np.pi,
-                                -1 / 4 * np.pi,
-                                id='bphase',
-                                value=-1 / 2 * np.pi,
-                                marks=None,
-                                tooltip={
-                                    "placement": "right",
-                                    "always_visible": True
-                                }, persistence=True,
-                            )
-                        ],
-                        style={
-                            'width': '70%',
-                            'display': 'inline-block',
-                            'margin': '0px 0px -25px 0px'
-                        },
-                    ),
-                ]),
+                html.Div(
+                    [
+                        html.Div(
+                            [
+                                "B \u03d5 (rad):",
+                            ],
+                            style={
+                                'display': 'inline-block',
+                                'margin': '10px 0px 0px 30px',
+                                'width': '120px'
+                            }),
+                        html.Div(
+                            [
+                                dcc.Slider(
+                                    -3 / 4 * np.pi,
+                                    -1 / 4 * np.pi,
+                                    id='bphase',
+                                    value=-1 / 2 * np.pi,
+                                    marks=None,
+                                    tooltip={
+                                        "placement": "right",
+                                        "always_visible": True
+                                    },
+                                    persistence=True,
+                                )
+                            ],
+                            style={
+                                'width': '24.5%',
+                                'display': 'inline-block',
+                                'margin': '0px 0px -25px 0px'
+                            },
+                        ),
+                        html.Div(
+                            ["Harmonic:"],
+                            style={
+                                'width': '78px',
+                                'margin': '0px 0px 0px 10px',
+                                'display': 'inline-block'
+                            }),
+                        dcc.Input(
+                            id='harmonic',
+                            value=0,
+                            type='number',
+                            style={
+                                'width': '50px',
+                                'height': '50px',
+                                # 'lineHeight': '50px',
+                                'borderWidth': '1px',
+                                'borderStyle': 'line',
+                                'borderRadius': '5px',
+                                'textAlign': 'left',
+                                'margin': '0px 0px 10px 0%',
+                                'display': 'inline-block'
+                            }, persistence=True),
+                        html.Div(
+                            ["Mod B (G):"],
+                            style={
+                                'width': '80px',
+                                'margin': '5px 0px 0px 10px',
+                                'display': 'inline-block'
+                            }),
+                        dcc.Input(
+                            id='modfield',
+                            value=0,
+                            type='number',
+                            style={
+                                'width': '65px',
+                                'height': '50px',
+                                # 'lineHeight': '50px',
+                                'borderWidth': '1px',
+                                'borderStyle': 'line',
+                                'borderRadius': '5px',
+                                'textAlign': 'left',
+                                'margin': '0px 0px 10px 0%',
+                                'display': 'inline-block'
+                            }, persistence=True),
+                    ], ),
                 html.Div([
                     html.Div(
                         [
@@ -618,7 +743,8 @@ app.layout = html.Div(
                                 tooltip={
                                     "placement": "right",
                                     "always_visible": True
-                                }, persistence=True,
+                                },
+                                persistence=True,
                             )
                         ],
                         style={
@@ -676,7 +802,8 @@ app.layout = html.Div(
                                 tooltip={
                                     "placement": "right",
                                     "always_visible": True
-                                }, persistence=True,
+                                },
+                                persistence=True,
                             )
                         ],
                         style={
@@ -690,7 +817,7 @@ app.layout = html.Div(
                     [
                         html.Div(["Path:"],
                                  style={
-                                     'width': '8%',
+                                     'width': '6.5%',
                                      'display': 'inline-block'
                                  }),
                         dcc.Input(
@@ -707,10 +834,11 @@ app.layout = html.Div(
                                 'textAlign': 'left',
                                 'margin': '0px 2% 10px 0%',
                                 'display': 'inline-block'
-                            }, persistence=True),
+                            },
+                            persistence=True),
                         html.Div(["Averages:"],
                                  style={
-                                     'width': '15%',
+                                     'width': '11.5%',
                                      'display': 'inline-block'
                                  }),
                         dcc.Input(

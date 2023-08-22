@@ -69,6 +69,7 @@ GAMMA = -1.7608e7  # rad / sG
 def sindrive(Bpp, f, t, Bphase=-np.pi / 2):
     # This is for phi=-np.pi/2 and t=0 at start of scan from Tseytlin 2020 eqn 28
     # Somehow require an extra negative here as compared to the paper but it works now anyway
+    # Integrated equation 6 for general phi
 
     return np.exp(-1j * GAMMA * Bpp * np.sin(np.pi * f * t) *
                   np.sin(np.pi * f * t + Bphase) / (2 * np.pi * f))

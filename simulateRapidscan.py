@@ -23,6 +23,7 @@ def Bloch(T1, T2, dw, freq, amp, t=-1, B1=0.14, sweep='sin', Bphase=-1 / 2 * np.
     :param sweep: Sweep profile ('sin' or 'lin')
     :param Bphase: Phase of sweep field at t=0
     :param phase: Phase of Mx + i*My
+    :return: t, solution sol(y[0] + 1j*y[1]), omega(t)
     """
     if not type(t) is np.ndarray:
         t = np.linspace(0, 1 / (2 * freq),  int(1 / (2*freq) / 2e-10)) # 10 data pts for each real pt on digitizer
@@ -100,7 +101,7 @@ def main(vary=''):
                     2 * ii, c=line[0].get_color(), alpha=0.5)
         title = rf'Rapidscan sim, $T_1=$ {T1:.0e} s, $T_2=$ {T2:.0e} s'
     else:
-        t, sol, omega  = Bloch(1e-6, 3e-7, 0, f, Bmod, )
+        t, sol, omega  = Bloch(T1, T2, 0, f, Bmod)
         sig = sol.y[0] + 1j * sol.y[1]
         line = ax.plot(
             sol.t, np.real(sig) / np.max(np.abs(sig)))
@@ -118,7 +119,7 @@ def main(vary=''):
     if vary != '':
         ax.legend()
     ax.set_title(title)
-    fig.savefig('/Volumes/GoogleDrive/My Drive/Research/Code/simulations' + title + '.png', transparent=True, dpi=400)
+    fig.savefig('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/simulations' + title + '.png', transparent=True, dpi=400)
     # ax.plot(t, sol)
 
 
