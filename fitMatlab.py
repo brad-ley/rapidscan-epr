@@ -5,6 +5,7 @@ from pathlib import PurePath as PP
 from readDataFile import read
 from scipy.optimize import curve_fit
 from scipy.integrate import cumtrapz
+from deconvolveRapidscan import lorentzian
 
 import PIL
 import matplotlib.pyplot as plt
@@ -29,11 +30,6 @@ if __name__=="__main__":
     plt.rcParams['ytick.minor.width'] = 1
     plt.rcParams['lines.linewidth'] = 2
 
-
-def lorentzian(x, c, A, x0, w):
-    return c + A / ((x-x0)**2 + w**2)
-
-
 def main(filename):
     data = np.loadtxt(filename, delimiter=',')
     fig, ax = plt.subplots(figsize=(6,4), layout='constrained')
@@ -55,7 +51,7 @@ def main(filename):
         fit = lorentzian(x, *popt)
         ax.plot(x, fit/np.max(fit) - i, c=line[0].get_color(), ls='--', label=f'{r[i-1]*1e9:.2f} nm; $\Delta\omega={popt[3]*10:.2f}$ G')
 
-    # ax.imshow(data[1:, :])
+    # ax.imshow(data[1:, :], aspect='auto')
 
     # ax.set_title(P(filename).stem.replace('_', ' ').title())
     ax.set_xlabel('Field (mT)')
@@ -71,6 +67,6 @@ if __name__ == "__main__":
     # for f in files:
     #     main(f)
     # filename = P('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/results_room_T_1.55_-7.72.txt')
-    filename = P('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/results_room_T_1.5_-7.72.txt')
+    filename = P('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/results_room_T_0.75_-7.72.txt')
     main(filename)
     plt.show()
