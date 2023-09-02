@@ -1,11 +1,15 @@
 import ast
 import os
+import time
 from pathlib import Path as P
 from pathlib import PurePath as PP
+from math import ceil
 from dataclasses import dataclass
 from scipy.optimize import curve_fit, minimize, Bounds, fmin, fmin_tnc
 from scipy.signal import windows
 from tqdm import tqdm
+from functools import partial
+from numba import njit, prange
 from deconvolveRapidscan import lorentzian
 
 import PIL
@@ -15,6 +19,7 @@ import numpy as np
 import pandas as pd
 import pyarrow.feather as feather
 import lmfit
+import pybroom
 
 from matplotlib import rc
 
@@ -68,17 +73,39 @@ def fit_fun(x, simulations, to_fit, r):
     return ((to_fit - ret(x, simulations, r))  ** 2) * windows.general_hamming(len(to_fit), 0.75)
 
 
-def proc(queue, ind, adjusted_spectra, dists, r, params, func=fit_fun):
-    spectrum = adjusted_spectra[ind, :]
+def proc(spectrum, dists, r, params, pbar=None, func=fit_fun):
+    # spectrum = adjusted_spectra[ind, :]
     obj = lmfit.Minimizer(fit_fun, params, fcn_args=(dists, spectrum, r))
     res = obj.minimize(method='ampgo')
-    queue.put( (ind, res) )
+    # queue.put( (ind, res) )
+
+    if pbar:
+        pbar.update(1)
     # meth = 'bfgs'
     # res2 = obj.minimize(method=meth)
     # lmfit.report_fit(res2)
 
     # ax.plot(specB, spectrum, label=f'data {ind}')
 
+    return res
+
+
+@njit(parallel=True)
+def jitproc(ind, adjusted_spectra, dists, r, params, pbar=None, func=fit_fun):
+    spectrum = adjusted_spectra[ind, :]
+    obj = lmfit.Minimizer(fit_fun, params, fcn_args=(dists, spectrum, r))
+    res = obj.minimize(method='ampgo')
+    # queue.put( (ind, res) )
+
+    if pbar:
+        pbar.update(1)
+    # meth = 'bfgs'
+    # res2 = obj.minimize(method=meth)
+    # lmfit.report_fit(res2)
+
+    # ax.plot(specB, spectrum, label=f'data {ind}')
+
+    return res
 
 def main(filename):
     mat = feather.read_feather(filename)
@@ -112,14 +139,14 @@ def main(filename):
         adjusted_spectra[ind, :][adjusted_spectra[ind, :] < 0] = 0
 
 
-    _data = np.loadtxt(P('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/results64_room_T_0.75_-7.72.txt'), delimiter=',')
+    _data = np.loadtxt(P('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/results_room_T_0.75_-7.72.txt'), delimiter=',')
     # fig, ax = plt.subplots(figsize=(6,4), layout='constrained')
     B = _data[0, :] * 10 # G
     B -= B[np.argmax(_data[-1, :])] # center to peak, use narrowest peak because weird stuff happens at broadest
     dists = _data[1:, :]
 
     interp_dists = np.zeros((len(_data[1:, 0]), len(specB)))
-    r = np.linspace(2, 6, len(_data[1:, 0]))
+    r = np.linspace(1.8, 6, len(_data[1:, 0]))
 
     for ind, dist in enumerate(_data[1:, :]):
         # dist /= np.max(_data)
@@ -129,6 +156,7 @@ def main(filename):
     fig, ax = plt.subplots(figsize=(6,4))
     ff, aa = plt.subplots(figsize=(6,4))
     f, a = plt.subplots(figsize=(6,4))
+    trans = a.get_xaxis_transform()  # x in data untis, y in axes fraction
     # bounds = Bounds([2, 0.05, -np.max(adjusted_spectra[-1, :]), np.min(adjusted_spectra[-1, :])],\
     #         [6, 2, np.max(adjusted_spectra[-1, :]), np.max(adjusted_spectra[-1, :])])
 
@@ -136,7 +164,11 @@ def main(filename):
     params = lmfit.create_params(
             r0=dict(value=5, vary=True, min=2.1, max=4),
             w0=dict(value=0.075, vary=True, min=0.05, max=0.125),
-            # offset=dict(value=-np.min(interp_dists), min=-np.max(interp_dists), max=np.max(interp_dists)),
+            # # offset=dict(value=-np.min(interp_dists), min=-np.max(interp_dists), max=np.max(interp_dists)),
+            # amp=dict(value=np.max(adjusted_spectra[-1, :]) / np.max(interp_dists[len(_data[1:, 0])//2]), min=0),
+            # offset=dict(value=-np.min(interp_dists)),
+            # r0=dict(value=5, vary=True,),
+            # w0=dict(value=0.075, vary=True,),
             amp=dict(value=np.max(adjusted_spectra[-1, :]) / np.max(interp_dists[len(_data[1:, 0])//2]), min=0),
             offset=dict(value=-np.min(interp_dists)),
             )
@@ -146,53 +178,68 @@ def main(filename):
 
     # for ind, spectrum in enumerate(adjusted_spectra):
     c = 0
-    rets = []
-    processes = []
-    q = mp.Queue()
-    for ind in range(0, len(adjusted_spectra[:, 0]), 40):
-        p = mp.Process(target=proc, args=(q, ind, adjusted_spectra, interp_dists, r, params))
-        processes.append(p)
-        p.start()
-        c += 1
-        print(c)
-    
-    for p in processes:
-        ret = q.get() # will block
-        rets.append(ret)
-    for p in processes:
-        p.join()
-
-    print(rets)
-
+    # num = len(adjusted_spectra[:, 0])
+    num = 8
+    start = time.perf_counter()
+    with mp.Pool(processes=8) as pool:
+        p = pool.map(partial(proc, dists=interp_dists, r=r, params=params), tqdm(adjusted_spectra[::ceil(len(adjusted_spectra[:, 0])/num), :]))
+    end = time.perf_counter()
+    print("Elapsed (after compilation) = {}s".format((end - start)))
     c = 0
+    # num = len(adjusted_spectra[:, 0])
+    num = 8
+    start = time.perf_counter()
+    p = []
+    for ind in tqdm(prange(0, len(adjusted_spectra[:, 0]), ceil( len(adjusted_spectra[:, 0]) / num))):
+        p.append(jitproc(ind, adjusted_spectra=adjusted_spectra, dists=interp_dists, r=r, params=params)) 
+    end = time.perf_counter()
+    print("Elapsed (after compilation) = {}s".format((end - start)))
+
+    dt = pybroom.tidy(p, var_names='time_pt')
+    dt.to_csv(P(filename).parent.joinpath(P(filename).stem + '_gaussian-fits.txt'), index=False)
+
+    for ind, res in enumerate(p):
     # for ind in list(out.keys()).sort():
-    #     ax.plot(specB, spectrum)
-    #     out = ret(res.params, interp_dists, r)
-    #     fwhm_ind = np.where(out > 0.5 * np.max(out))[0]
-    #     fwhm = np.abs(specB[fwhm_ind[0]] - specB[fwhm_ind[-1]])
-    #     ax.plot(specB, out + 1 + 0.1*c, label=f'ampgo {fwhm:.1f} G')
-    #     # out = ret(res2.params, interp_dists, r)
-    #     # fwhm_ind = np.where(out > 0.5 * np.max(out))[0]
-    #     # fwhm = np.abs(specB[fwhm_ind[0]] - specB[fwhm_ind[-1]])
-    #     # ax.plot(specB, out, label=meth + f' {fwhm:.1f} G')
+        spectrum = adjusted_spectra[ind, :]
+        ax.plot(specB, spectrum)
+        out = ret(res.params, interp_dists, r)
+        fwhm_ind = np.where(out > 0.5 * np.max(out))[0]
+        fwhm = np.abs(specB[fwhm_ind[0]] - specB[fwhm_ind[-1]])
+        ax.plot(specB, out + 1 + 0.1*c, label=f'ampgo {fwhm:.1f} G')
+        # out = ret(res2.params, interp_dists, r)
+        # fwhm_ind = np.where(out > 0.5 * np.max(out))[0]
+        # fwhm = np.abs(specB[fwhm_ind[0]] - specB[fwhm_ind[-1]])
+        # ax.plot(specB, out, label=meth + f' {fwhm:.1f} G')
 
-    #     a.plot(r, gaussian(r, res.params['r0'].value, res.params['w0'].value) + 10 * c, label='ampgo')
-    #     # a.plot(r, gaussian(r, res2.params['r0'].value, res2.params['w0'].value), label=meth)
+        # a.plot(r, gaussian(r, res.params['r0'].value, res.params['w0'].value) + 10 * c, label='ampgo')
+        a.plot(r, gaussian(r, res.params['r0'].value, res.params['w0'].value) + 10 * c, label=f"{res.params['r0'].value:.2f} nm")
+        a.annotate(f"{res.params['r0'].value:.2f} nm", (5, 1 + 10 * c ))
+        # a.plot(r, gaussian(r, res2.params['r0'].value, res2.params['w0'].value), label=meth)
 
-    #     # popt, _ = curve_fit(lorentzian, specB, spectrum)
-    #     # ax.plot(specB, lorentzian(specB, *popt), label='curve_fit')
+        # popt, _ = curve_fit(lorentzian, specB, spectrum)
+        # ax.plot(specB, lorentzian(specB, *popt), label='curve_fit')
 
-    #     aa.plot(specB, res.residual, label='ampgo')
-    #     # aa.plot(specB, res2.residual, label=meth)
-    #     # aa.plot(specB, (spectrum - lorentzian(specB, *popt))**2, label='curve_fit')
-
-    #     c += 1
+        aa.plot(specB, res.residual, label='ampgo')
+        # aa.plot(specB, res2.residual, label=meth)
+        # aa.plot(specB, (spectrum - lorentzian(specB, *popt))**2, label='curve_fit')
 
     #     # break
 
-    # ax.legend()
+    ax.set_ylabel('Signal')
+    ax.set_xlabel('Field (G)')
+    a.set_ylabel('Time')
+    a.set_xlabel('Distance (nm)')
+    aa.set_xlabel('Field')
+    aa.set_ylabel('Residual')
+
+    fg, ag = plt.subplots()
+    ag.plot([ii.params['r0'].value for ii in p])
+    ag.set_xlabel('Time')
+    ag.set_ylabel('Distance (nm)')
+
+    ax.legend()
     # a.legend()
-    # aa.legend()
+    aa.legend()
 
 if __name__ == "__main__":
     filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/30/FMN sample/stable/283.8/M01_283.8K_stable_pre30s_on10s_off470s_25000avgs_filtered_batchDecon.feather'

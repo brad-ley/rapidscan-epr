@@ -1,34 +1,52 @@
-Brotli @ file:///Users/ec2-user/ci_py311/brotli-split_1678379922007/work
-click @ file:///Users/ec2-user/ci_py311/click_1678318124837/work
+asteval==0.9.31
+Brotli==1.0.9
+click==8.0.4
 contourpy==1.1.0
 cycler==0.11.0
-dash @ file:///Users/ec2-user/ci_py311/dash_1678410845018/work
+dash==2.7.0
 dill==0.3.6
 diskcache==5.6.1
-Flask @ file:///Users/ec2-user/ci_py311/flask_1678380788105/work
-Flask-Compress @ file:///Users/ec2-user/ci_py311/flask-compress_1678391154931/work
+emcee==3.1.4
+ffmpeg==1.4
+ffmpeg-python==0.2.0
+Flask==2.2.2
+Flask-Compress==1.13
 fonttools==4.40.0
+future==0.18.3
 intel-openmp==2023.1.0
-itsdangerous @ file:///tmp/build/80754af9/itsdangerous_1621432558163/work
-Jinja2 @ file:///Users/ec2-user/ci_py311/jinja2_1678317138271/work
+itsdangerous==2.0.1
+jedi==0.18.2
+Jinja2==3.1.2
+joblib==1.3.2
 kiwisolver==1.4.4
-MarkupSafe @ file:///Users/ec2-user/ci_py311/markupsafe_1678316973889/work
+llvmlite==0.40.1
+lmfit==1.2.2
+MarkupSafe==2.1.1
 matplotlib==3.7.1
 mkl==2023.1.0
 multiprocess==0.70.14
-numpy==1.25.0
+numba==0.57.1
+numdifftools==0.9.41
+numpy==1.24.4
 packaging==23.1
 pandas==2.0.3
+parso==0.8.3
 Pillow==10.0.0
-plotly @ file:///Users/ec2-user/ci_py311/plotly_1678382250051/work
+pip==23.1.2
+plotly==5.9.0
 psutil==5.9.5
+pyarrow==12.0.1
+pybroom==0.2
 pyparsing==3.1.0
 python-dateutil==2.8.2
 pytz==2023.3
 scipy==1.11.1
+setuptools==67.8.0
 six==1.16.0
 tbb==2021.9.0
-tenacity @ file:///private/var/folders/sy/f16zz6x50xz3113nwtb9bvq00000gp/T/abs_cct5tq4h70/croot/tenacity_1682972283326/work
-tqdm @ file:///private/var/folders/sy/f16zz6x50xz3113nwtb9bvq00000gp/T/abs_03acd6t6ca/croot/tqdm_1679561866522/work
+tenacity==8.2.2
+tqdm==4.65.0
 tzdata==2023.3
-Werkzeug @ file:///private/var/folders/sy/f16zz6x50xz3113nwtb9bvq00000gp/T/abs_fegt3z60s3/croot/werkzeug_1679489762631/work
+uncertainties==3.1.7
+Werkzeug==2.2.3
+wheel==0.38.4
