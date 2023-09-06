@@ -5,6 +5,7 @@ from pathlib import PurePath as PP
 from readDataFile import read
 from scipy.optimize import curve_fit
 from scipy.integrate import cumtrapz
+from math import ceil
 from deconvolveRapidscan import lorentzian
 
 import PIL
@@ -39,17 +40,21 @@ def main(filename):
         x = data[0, :-1]
 
 
-    r = np.linspace(2.4e-9, 5e-9, len(data[1:, 0]))
+    r = np.linspace(1.5e-9, 4.5e-9, len(data[1:, 0]))
 
-    for i in range(1, len(data[0:, :])):
+    c = 0
+    num = 8
+    for i in range(1, len(data[0:, :]), ceil(len(data[0:, :])/num)):
         y = data[i,:]
 
         if 'mod' in filename.stem.lower():
             y = cumtrapz(y)
         popt, pcov = curve_fit(lorentzian, x, y, p0=[0, 10000, 8608, 1])
-        line = ax.plot(x,y/np.max(y)-i)
+        line = ax.plot(x,y/np.max(y) - c)
         fit = lorentzian(x, *popt)
-        ax.plot(x, fit/np.max(fit) - i, c=line[0].get_color(), ls='--', label=f'{r[i-1]*1e9:.2f} nm; $\Delta\omega={popt[3]*10:.2f}$ G')
+        ax.plot(x, fit/np.max(fit) - c, c=line[0].get_color(), ls='--', label=f'{r[i-1]*1e9:.2f} nm; $\Delta\omega={popt[3]*10:.2f}$ G')
+
+        c += 1
 
     # ax.imshow(data[1:, :], aspect='auto')
 
@@ -67,6 +72,6 @@ if __name__ == "__main__":
     # for f in files:
     #     main(f)
     # filename = P('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/results_room_T_1.55_-7.72.txt')
-    filename = P('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/results_room_T_0.75_-7.72.txt')
+    filename = P('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/results_room_T_0.475_-7.72.txt')
     main(filename)
     plt.show()

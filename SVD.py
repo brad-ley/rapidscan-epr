@@ -4,6 +4,8 @@ from pathlib import Path as P
 from pathlib import PurePath as PP
 from dataclasses import dataclass
 from readDataFile import read
+from scipy.optimize import curve_fit
+from deconvolveRapidscan import lorentzian
 
 import PIL
 import matplotlib.pyplot as plt
@@ -91,20 +93,22 @@ def main(filename):
     # plt.show()
 
     ### CENTERING ### 
-    dat = np.zeros(((h-l), len(cols)))
-    for ind, col in enumerate(cols):
-        # center = np.argmax(mat[col][l:h].to_numpy()) + l
-        tdat = mat[col][l:h].to_numpy()
-        n = 2**7
-        rolling = np.array([np.mean(tdat[ii-n:ii+n]) if (ii > n and len(tdat) - ii > n) else 0 for ii, _ in enumerate(tdat)])
-        center = np.argmax(rolling) + l
-        coldat = mat[col].to_numpy()
-        try:
-            dat[:, ind] = coldat[center - int((h-l)/2):center + int((h-l)/2)]
-            # dat[:, ind] = coldat.to_numpy()[len(coldat)//2 - (h-l)//4: len(coldat)//2 + (h-l)//4]
-        except ValueError:
-            dat[:, ind] = coldat[center - int((h-l)/2):center + int((h-l)/2) + 1]
-            # dat[:, ind] = coldat.to_numpy()[len(coldat)//2 - (h-l)//4: len(coldat)//2 + (h-l)//4 + 1]
+    if True:
+        dat = np.zeros(((h-l), len(cols)))
+        for ind, col in enumerate(cols):
+            # center = np.argmax(mat[col][l:h].to_numpy()) + l
+            tdat = mat[col][l:h].to_numpy()
+            # n = 2**3
+            n = 2**7
+            rolling = np.array([np.mean(tdat[ii-n:ii+n]) if (ii > n and len(tdat) - ii > n) else 0 for ii, _ in enumerate(tdat)])
+            center = np.argmax(rolling) + l
+            coldat = mat[col].to_numpy()
+            try:
+                dat[:, ind] = coldat[center - int((h-l)/2):center + int((h-l)/2)]
+                # dat[:, ind] = coldat.to_numpy()[len(coldat)//2 - (h-l)//4: len(coldat)//2 + (h-l)//4]
+            except ValueError:
+                dat[:, ind] = coldat[center - int((h-l)/2):center + int((h-l)/2) + 1]
+                # dat[:, ind] = coldat.to_numpy()[len(coldat)//2 - (h-l)//4: len(coldat)//2 + (h-l)//4 + 1]
     ### CENTERING ### 
 
     f, a = plt.subplots()
@@ -121,6 +125,10 @@ def main(filename):
     fh, ah = plt.subplots()
     ah.plot(B, V[:, 0], label='$C_1$')
     ah.plot(B, V[:, 1], label='$C_2$')
+    for i in range(2):
+        popt, pcov = curve_fit(lorentzian, B, V[:, i])
+        print(popt)
+        ah.plot(B, lorentzian(B, *popt), label='fit')
     ah.set_xlabel('Field (G)')
     ah.set_ylabel('Amplitude')
     ah.legend()
@@ -134,6 +142,6 @@ def main(filename):
 
 
 if __name__ == "__main__":
-    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/30/FMN sample/stable/279.6/M01_279.6K_unstable_pre30s_on10s_off470s_25000avgs_filtered_batchDecon.feather'
+    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/7/11/5000 2/78mA_16.7kHz_acq120s_5000avgs_filtered_batchDecon.feather'
     main(filename)
     plt.show()
