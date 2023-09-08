@@ -31,7 +31,7 @@ if __name__=="__main__":
     plt.rcParams['ytick.minor.width'] = 1
     plt.rcParams['lines.linewidth'] = 2
 
-def main(filename):
+def main(filename, ri, rf):
     data = np.loadtxt(filename, delimiter=',')
     fig, ax = plt.subplots(figsize=(6,4), layout='constrained')
     x = data[0, :]
@@ -39,8 +39,9 @@ def main(filename):
     if 'mod' in filename.stem.lower():
         x = data[0, :-1]
 
+    data[1:, :] -= np.min(data[1:, :])
 
-    r = np.linspace(1.5e-9, 4.5e-9, len(data[1:, 0]))
+    r = np.linspace(ri, rf, len(data[1:, 0])) * 1e-9
 
     c = 0
     num = 8
@@ -49,7 +50,8 @@ def main(filename):
 
         if 'mod' in filename.stem.lower():
             y = cumtrapz(y)
-        popt, pcov = curve_fit(lorentzian, x, y, p0=[0, 10000, 8608, 1])
+        popt, pcov = curve_fit(lorentzian, x, y, p0=[0, np.max(y), 8608, 1])
+        # print(popt)
         line = ax.plot(x,y/np.max(y) - c)
         fit = lorentzian(x, *popt)
         ax.plot(x, fit/np.max(fit) - c, c=line[0].get_color(), ls='--', label=f'{r[i-1]*1e9:.2f} nm; $\Delta\omega={popt[3]*10:.2f}$ G')
@@ -72,6 +74,6 @@ if __name__ == "__main__":
     # for f in files:
     #     main(f)
     # filename = P('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/results_room_T_1.55_-7.72.txt')
-    filename = P('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/results_room_T_0.475_-7.72.txt')
-    main(filename)
+    filename = P('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/small_results_room_T_0.5_-7.72.txt')
+    main(filename, ri=2.3, rf=6)
     plt.show()
