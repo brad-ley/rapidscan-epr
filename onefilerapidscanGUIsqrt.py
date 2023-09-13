@@ -1,3 +1,7 @@
+"""
+Use this file for any rs datafile acquired before 09/12/23
+"""
+
 import base64
 import io
 from pathlib import Path as P
