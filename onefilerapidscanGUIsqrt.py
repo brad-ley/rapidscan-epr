@@ -189,7 +189,8 @@ def batch(_, coil, amp, freq, bphase, datajson, filepath, addpi_n, sigphase,
 
         for i in tqdm(range(0, len(cols))):
             d = cols[i]
-            sendd = pd.DataFrame({'time': t, 0: dat[d]})
+            ## HERE
+            sendd = pd.DataFrame({'time': t, 0: np.sqrt(dat[d])})
             sendd = sendd.to_json(orient='split')
             outjson = decon(sendd, coil, amp, freq, bphase, harm, modfield)
             # temp = pd.read_json(outjson, orient='split')
@@ -491,7 +492,7 @@ def parse_contents(filepath):
         h = html.Div(f"Loaded {P(filepath).name}", style={'color': 'green'})
         firstrun['time'] = dat['time']
         # firstrun[0] = dat[dat.columns[int(len(dat.columns)/2)]]
-        firstrun[0] = dat[dat.columns[1]]
+        firstrun[0] = np.sqrt(dat[dat.columns[1]])
     # try:
     #     pass
     except (FileExistsError, FileNotFoundError):

@@ -340,7 +340,7 @@ def process(filename,
 
 
 if __name__ == "__main__":
-    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/18/AsLOV2/tsweep/291.8/t1-291.8K-unstable_pre5s_on10s_off230s_25000avgs_filtered.dat'
+    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/30/FMN sample/stable/279.6/M01_279.6K_unstable_pre30s_on10s_off470s_25000avgs_filtered.dat'
 
     if not P(filename).stem.endswith('Decon'):
         filename = P(filename).parent.joinpath(
@@ -350,7 +350,7 @@ if __name__ == "__main__":
     # plotfields = 0.9 + 6 * np.array([-1, 1])
     # plotfields = 11.4 + 10 * np.array([-1, 1])
     ### LiPC ###
-    plotfields = 0 + np.array([-20, 20])
+    plotfields = 7.5 + np.array([-20, 20])
     try:
         on = float(''.join([
             ii for ii in ''.join(

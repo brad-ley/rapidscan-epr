@@ -184,7 +184,7 @@ def main(filename, ri, rf, numplots=-1):
             w00=dict(value=0.65, vary=False, min=0.05, max=1),
             r01=dict(value=4.75, vary=False, min=2.35, max=5),
             w01=dict(value=0.21, vary=False, min=0.05, max=1),
-            a=dict(value=0.02, vary=True, min=0, max=1),
+            a=dict(value=0.05, vary=True, min=0, max=1),
             amp=dict(value=np.max(adjusted_spectra[-1, :]) / np.max(interp_dists), vary=True),
             offset=dict(value=0, vary=False),
             )
@@ -271,12 +271,15 @@ def plot(filename, numplots=-1):
     pre = float(''.join([ii for ii in ''.join([i for i in P(filename).stem.split('_') if 'pre' in i]) if ii.isdigit()]))
     on = float(''.join([ii for ii in ''.join([i for i in P(filename).stem.split('_') if 'on' in i]) if ii.isdigit()]))
     tstart = pre + on
+    distances *= 100
     popt, pcov = curve_fit(exponential, times[times > tstart], distances[times > tstart], p0=[np.min(distances), np.max(distances), np.max(times)])
-    ag.axvspan(pre, pre + on, facecolor='#00A7CA', alpha=0.25)
-    ag.scatter(np.linspace(np.min(times), np.max(times), len(distances)), distances, c='k')
-    ag.plot(times[times > tstart], exponential(times[times > tstart], *popt), ls='--', c='r')
+    ag.axvspan(pre, pre + on, facecolor='#00A7CA', alpha=0.25, label='Laser on')
+    ag.scatter(np.linspace(np.min(times), np.max(times), len(distances)), distances, c='k', label='\% unfolded')
+    ag.plot(times[times > tstart], exponential(times[times > tstart], *popt), ls='--', c='r', label=rf'$\tau={popt[-1]:.1f}\,$ns')
     ag.set_xlabel('Time (s)')
-    ag.set_ylabel('Extended fraction')
+    ag.set_ylabel(r'Extended fraction (\%)')
+    ag.legend(handlelength=0.75, labelspacing=0.25)
+    ag.set_ylim(bottom=0)
 
     ax.set_ylabel('Time (s)')
     ax.set_xlabel('Distance (nm)')
