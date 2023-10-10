@@ -50,7 +50,7 @@ class Fitfile:
             float(self.instr[1].split(', ')[0]))
 
     def tau(self):
-        return float(self.instr[1].split(', ')[2])
+        return float(self.instr[1].split(', ')[2]), float(self.instr[4].split(', ')[2])
 
 
 def checkfloat(inputstr: str):
@@ -68,18 +68,18 @@ def main(folder):
         ii for ii in P(folder).iterdir() if ii.is_dir() and checkfloat(ii.name)
     ])
 
-    outstr = f"Temp (K), Depth (G), Efficiency (%), Time (s)\n"
+    outstr = f"Temp (K), Depth (G), Efficiency (%), Time (s), Time error (s)\n"
     for sf in subfolders:
         fitfile = [
             ii for ii in sf.iterdir() if ii.name == 'LWfit-values.txt'
         ][0]
         v = Fitfile()
         v.load(fitfile)
-        outstr += f"{float(sf.name.split('#')[0])}, {v.depth()}, {v.efficiency():.2f}, {v.tau():.2f}\n"
+        outstr += f"{float(sf.name.split('#')[0])}, {v.depth()}, {v.efficiency():.2f}, {v.tau()[0]:.2f}, {v.tau()[1]:.2f}\n"
 
     P(folder).joinpath('combined_LWfit_values.txt').write_text(outstr)
 
 
 if __name__ == "__main__":
-    folder = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/30/FMN sample/stable'
+    folder = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/31/FMN sample/stable'
     main(folder)

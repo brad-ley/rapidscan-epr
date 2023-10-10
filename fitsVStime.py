@@ -13,27 +13,18 @@ from scipy.optimize import curve_fit as cf
 from filterReal import isdigit
 
 plt.style.use(['science'])
-# rc('text.latex', preamble=r'\usepackage{cmbright}')
-# plt.rcParams['font.family'] = 'sans-serif'
-# plt.rcParams['font.size'] = 14
+rc('text.latex', preamble=r'\usepackage{cmbright}')
+plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.size'] = 18
-# plt.rcParams['axes.linewidth'] = 1
 plt.rcParams['axes.linewidth'] = 1.5
-# plt.rcParams['xtick.major.size'] = 5
 plt.rcParams['xtick.major.size'] = 6
-# plt.rcParams['xtick.major.width'] = 1
 plt.rcParams['xtick.major.width'] = 1.5
-# plt.rcParams['xtick.minor.size'] = 2
 plt.rcParams['xtick.minor.size'] = 3
 plt.rcParams['xtick.minor.width'] = 1
-# plt.rcParams['ytick.major.size'] = 5
 plt.rcParams['ytick.major.size'] = 6
-# plt.rcParams['ytick.major.width'] = 1
 plt.rcParams['ytick.major.width'] = 1.5
-# plt.rcParams['ytick.minor.size'] = 2
 plt.rcParams['ytick.minor.size'] = 3
 plt.rcParams['ytick.minor.width'] = 1
-# plt.rcParams['lines.linewidth'] = 2
 plt.rcParams['lines.linewidth'] = 4
 if False:
     plt.style.use(['science'])
@@ -173,8 +164,6 @@ def plotfits(filename, ontimes=(0, -1)):
                 #     )
                 
                 ### LiPC ###
-
-                # if fitdict[key] == 'Raw pk2pkh':
                 ### LiPC ###
                 if fitdict[key] == '$\Delta \omega$':
                 # if fitdict[key] in ['Peak-to-peak']:
@@ -191,7 +180,7 @@ def plotfits(filename, ontimes=(0, -1)):
                         label = 'pk2pk'
                     else:
                         # label = fitdict[key].strip('$')
-                        label = r'\Delta H'
+                        label = r'$\Delta B$'
 
                     ### LiPC ###
                     # popt, pcov = cf(
@@ -223,9 +212,10 @@ def plotfits(filename, ontimes=(0, -1)):
                         # yw / np.max(strexp(fitt, *popt)),
                         ### LiPC ###
                         yw,
-                        label=f'{fitdict[key]}',
+                        label=label,
                         # label=rf'${label}$',
-                        c='black')
+                        c='black',
+                        )
 
                     err95 = 2*np.sqrt(np.diag(pcov))
                     outstr = f"offset, amplitude, time constant (s)\n{popt[0]:.4f}, {popt[1]:.4f}, {popt[2]:.4f}\n--------------------\n95% confidence\n{err95[0]:.2e}, {err95[1]:.2e}, {err95[2]:.2e}\n"
@@ -245,6 +235,11 @@ def plotfits(filename, ontimes=(0, -1)):
                         # fitlabel = rf'$\tau={popt[2]:.1f}\pm{err95[2]:.1f}$ s'
                         ### LiPC ###
 
+                    popt_1 = np.copy(popt)
+                    popt_3 = np.copy(popt)
+                    popt_1[2] -= err95[2]
+                    popt_3[2] += err95[2]
+
                     ### LiPC ###
                     # axw.plot(
                     #     fitt + offset,
@@ -253,11 +248,6 @@ def plotfits(filename, ontimes=(0, -1)):
                     #     c='red',
                     #     ls='--',
                     #     label=fitlabel)
-                    popt_1 = np.copy(popt)
-                    popt_3 = np.copy(popt)
-                    popt_1[2] -= err95[2]
-                    popt_3[2] += err95[2]
-                    ### LiPC ###
                     # popt_1[3] -= err95[3]
                     # popt_3[3] -= err95[3]
                     # popt_2 = np.copy(popt)
@@ -272,6 +262,7 @@ def plotfits(filename, ontimes=(0, -1)):
                     # fill1 = strexp(fitt, *popt_1) / np.max(strexp(fitt, *popt_1))
                     # fill3 = strexp(fitt, *popt_3) / np.max(strexp(fitt, *popt_3))
                     ### LiPC ###
+
                     fill1 = exp(fitt, *popt_1) / np.max(exp(fitt, *popt_1))
                     fill3 = exp(fitt, *popt_3) / np.max(exp(fitt, *popt_3))
                     if 'fillarray' in locals():
@@ -291,19 +282,24 @@ def plotfits(filename, ontimes=(0, -1)):
                     # fiterr = np.std(
                     #     (np.abs(yw)[ts > FIT_T] - strexp(fitt, *popt)) / np.max(strexp(fitt, *popt)))
                     # fiterr /= np.max(strexp(fitt, *popt))
-                    fiterr = np.std(
-                        (np.abs(yw)[ts > FIT_T] - exp(fitt, *popt)) / np.max(exp(fitt, *popt)))
-                    fiterr /= np.max(exp(fitt, *popt))
-                    P(filename).parent.joinpath('err-from-fit.txt').write_text(
-                        f"std(raw-fit)={fiterr:.3e}")
+                    # fiterr = np.std(
+                    #     (np.abs(yw)[ts > FIT_T] - exp(fitt, *popt)) / np.max(exp(fitt, *popt)))
+                    # fiterr /= np.max(exp(fitt, *popt))
+                    # P(filename).parent.joinpath('err-from-fit.txt').write_text(
+                    #     f"std(raw-fit)={fiterr:.3e}")
                     ### LiPC ###
                     axw.plot(
                         fitt + offset,
-                        # exp(fitt, *popt),
+                        ### LiPC ###
+                        # strexp(fitt, *popt),
+                        ### LiPC ###
                         exp(fitt, *popt),
+
                         c='red',
                         ls='--',
-                        label=fitlabel)
+                        # label=fitlabel)
+                        # label=f'$\tau={popt[-1]:.1f}\pm{np.sqrt(np.diag(pcov))[-1]:.1f}\,$s')
+                        label=rf'$\tau={popt[-1]:.1f}\,$s')
 
             except RuntimeError:
             # except IndexError:
@@ -320,9 +316,8 @@ def plotfits(filename, ontimes=(0, -1)):
     # ax.set_ylim(top=1.25)
     # ax.set_xlim()
     ax.set_ylabel('Fit value (arb. u)')
-    axw.set_ylabel('Width (G)')
+    axw.set_ylabel('Linewidth (G)')
     ### LiPC ###
-    # axw.set_ylabel('pk2pk height (au)')
     ### LiPC ###
     # axw.set_ylim(bottom=0)
 
@@ -337,11 +332,10 @@ def plotfits(filename, ontimes=(0, -1)):
             alpha=0.25,
             label='Laser on')
             ### LiPC ###
-            # label='N$_2$'
-            # )
+            # label='N$_2$')
             ### LiPC ###
         ### LiPC ###
-        # a.annotate('B)', (0, 1.305))
+        a.annotate('b)', (0, 1.26))
         # a.annotate('N$_2$', (5, 1.19))
         # a.annotate('Air', (ontimes[1] + 5, 1.19))
         ### LiPC ###
@@ -355,9 +349,10 @@ def plotfits(filename, ontimes=(0, -1)):
             order = range(len(handles))
             a.legend([handles[idx] for idx in order],
                      [labels[idx] for idx in order],
-                     handletextpad=0.5,
+                     handletextpad=0.25,
                      handlelength=1,
-                     markerfirst=True)
+                     labelspacing=0.25,
+                     markerfirst=False)
     # fig.savefig(P(filename).parent.joinpath('timedepfits.png'), dpi=400, transparent=True)
     # figw.savefig(P(filename).parent.joinpath('LWfit.png'), dpi=400, transparent=True)
     fig.savefig(P(filename).parent.joinpath('timedepfits.png'),

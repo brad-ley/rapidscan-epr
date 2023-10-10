@@ -39,7 +39,7 @@ def decompose(mat, times):
 
     # ff.savefig('/Users/Brad/Desktop/princpal_comps_297.5.png', dpi=600)
 
-    k = 2
+    k = 4
 
     v = V[:, :k]
     PCAmT = v.T @ mT
@@ -69,7 +69,7 @@ def decompose(mat, times):
     # ah.plot((V[:, :o] @ V[:, :o].T @ mT + mu)[:, 200], label='200 ' + str(o))
     # ah.plot((V[:, :o] @ V[:, :o].T @ mT + mu)[:, 300], label='300 ' + str(o))
     # ah.legend()
-    return PCAmT, V
+    return PCAmT, V, E
 
 
 def main(filename):
@@ -121,14 +121,18 @@ def main(filename):
     times = np.array(
             ast.literal_eval(P(filename).parent.joinpath('times.txt').read_text()))
 
-    PCA, V = decompose(dat, times)
+    PCA, V, E = decompose(dat, times)
     fh, ah = plt.subplots()
-    ah.plot(B, V[:, 0], label='$C_1$')
-    ah.plot(B, V[:, 1], label='$C_2$')
-    for i in range(2):
+    fg, ag = plt.subplots()
+    ag.plot(range(1, len(E) + 1), E / len(E))
+    ah.plot(B, V[:, 0] + 0.1 * 0, label='$C_1$')
+    ah.plot(B, V[:, 1] + 0.1 * 1, label='$C_2$')
+    ah.plot(B, V[:, 2] + 0.1 * 2, label='$C_3$')
+    ah.plot(B, V[:, 3] + 0.1 * 3, label='$C_4$')
+
+    for i in range(4):
         popt, pcov = curve_fit(lorentzian, B, V[:, i])
-        print(popt)
-        ah.plot(B, lorentzian(B, *popt), label='fit')
+        ah.plot(B, lorentzian(B, *popt) + 0.1 * i, label='fit')
     ah.set_xlabel('Field (G)')
     ah.set_ylabel('Amplitude')
     ah.legend()
@@ -142,6 +146,6 @@ def main(filename):
 
 
 if __name__ == "__main__":
-    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/7/11/5000 2/78mA_16.7kHz_acq120s_5000avgs_filtered_batchDecon.feather'
+    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/30/FMN sample/stable/279.6 sqrt copy/M01_279.6K_unstable_pre30s_on10s_off470s_25000avgs_filtered_batchDecon.feather'
     main(filename)
     plt.show()

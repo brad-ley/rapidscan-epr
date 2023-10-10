@@ -83,14 +83,16 @@ def ret(pars, simulations, single, r):
     amp = parvals['amp']
     # amp = parvals['amp']
     # o = offset + lin_combo(simulations, gaussian(r, r0, w))
-    o = lin_combo(simulations, triple_gaussian(r, r0, w0, r1, w1, r2, w2, a, b))
+    # o = lin_combo(simulations, triple_gaussian(r, r0, w0, r1, w1, r2, w2, a, b))
+    o = np.convolve(single, lin_combo(simulations, triple_gaussian(r, r0, w0, r1, w1, r2, w2, a, 0)), mode='same')
+    o = (1 - b) * o + b * single / np.max(single) * np.max(o)
     # o = lin_combo(simulations, gaussian(r, r0, w0))
     # o -= np.min(o)
     # o /= np.max(o)
     o *= amp
     o -= offset
 
-    return np.convolve(single, o, mode='same')
+    return o
 
 
 def fit_fun(x, simulations, to_fit, r, single, fitidx):
@@ -119,10 +121,11 @@ def proc(spectrum, dists, r, single, params, fitidx=[0, None], pbar=None, func=f
     return res
 
 
-def main(filename, ri, rf, plotfield=30, numplots=-1):
+def main(filename, ri, rf, numplots=-1):
 
     mat = feather.read_feather(filename)
     cols = [ii for ii in mat.columns if 'abs' in ii]
+    plotfield = 27
     # plotcenter = -15
     B = mat['B'].to_numpy()
     first = mat[cols[0]].to_numpy()[np.abs(B) < plotfield]
@@ -158,11 +161,11 @@ def main(filename, ri, rf, plotfield=30, numplots=-1):
 
     ### CENTERING ### 
 
-    _data = np.loadtxt(P('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/solid_results_room_T_spin12_-7.txt'), delimiter=',')
+    _data = np.loadtxt(P('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/solid_results_room_T.txt'), delimiter=',')
     br = np.loadtxt(P('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/singlespin_lorentz_results_room_T_0.4_-7.72.txt'), delimiter=',')
     _mat = feather.read_feather('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/9/19/M01_101mA_23.4kHz_acq180s_25000avgs_filtered_batchDecon.feather')
     _cols = [ii for ii in _mat.columns if 'abs' in ii]
-    _plotfield = plotfield
+    _plotfield = 27
     # plotcenter = -15
     _B = mat['B'].to_numpy()
     _first = mat[_cols[0]].to_numpy()[np.abs(_B) < _plotfield]
@@ -233,15 +236,15 @@ def main(filename, ri, rf, plotfield=30, numplots=-1):
 
     # add with tuples: (NAME VALUE VARY MIN  MAX  EXPR  BRUTE_STEP)
     params = lmfit.create_params(
-            r0=dict(value=1.9, vary=False, min=1.5, max=4),
-            w0=dict(value=0.2, vary=False, min=0.25, max=1.5),
-            r1=dict(value=4., vary=False, min=2.1, max=7),
-            w1=dict(value=0.2, vary=False, min=0.1, max=0.9),
-            r2=dict(value=2.7, vary=False, min=2.35, max=6),
+            r0=dict(value=2.5, vary=False, min=2.1, max=5),
+            w0=dict(value=0.5, vary=False, min=0.25, max=1.5),
+            r1=dict(value=4.5, vary=False, min=2.1, max=7),
+            w1=dict(value=0.25, vary=False, min=0.1, max=0.9),
+            r2=dict(value=5.8, vary=False, min=2.35, max=6),
             w2=dict(value=0.5, vary=False, min=0.05, max=0.9),
-            a=dict(value=0.0, vary=True, min=0, max=1),
-            b=dict(value=0., vary=False, min=0, max=1),
-            amp=dict(value=np.max(adjusted_spectra[-1, :]) / np.max(interp_dists) / 10, vary=True),
+            a=dict(value=0.5, vary=True, min=0, max=1),
+            b=dict(value=0.5, vary=False, min=0, max=1),
+            amp=dict(value=np.max(adjusted_spectra[-1, :]) / np.max(interp_dists), vary=True),
             offset=dict(value=0, vary=False),
             )
     
@@ -249,8 +252,8 @@ def main(filename, ri, rf, plotfield=30, numplots=-1):
 
     # for ind, spectrum in enumerate(adjusted_spectra):
     c = 0
-    num = len(adjusted_spectra_zeros[:, 0])
-    # num = numplots
+    # num = len(adjusted_spectra_zeros[:, 0])
+    num = numplots
     # num = 24
     start = time.perf_counter()
     inds = range(0, len(adjusted_spectra_zeros[:, 0]), ceil(len(adjusted_spectra_zeros[:, 0])/num))
@@ -272,23 +275,23 @@ def main(filename, ri, rf, plotfield=30, numplots=-1):
         line, = ax.plot(B, spectrum/np.max(spectrum) + c)
         rp = res.params.valuesdict()
         out = ret(res.params, interp_dists, single, r)
-        # fwhm_ind = np.where(out > 0.5 * np.max(out))[0]
-        # fwhm = np.abs(specB[fwhm_ind[0]] - specB[fwhm_ind[-1]])
         ax.plot(B, out/np.max(spectrum) + c, label=f'', c=line.get_color(), ls="--")
+        # ax.plot(B, out/np.max(spectrum) + 0, label=f'', ls="--")
         ax.plot(B, single/np.max(spectrum) + c, c=line.get_color(), ls=":")
-        c += 0.2
+        c += 1
 
     dtr = pd.DataFrame(columns=['name', 'value'])
     dtr.loc[0, 'name'] = 'r'
     dtr.at[0, 'value'] = [list(r)]
+    dtr.loc[1, 'name'] = 'single'
+    dtr.at[1, 'value'] = [list(single)]
     dt = pybroom.tidy(p, var_names='time_pt')
     dt = pd.concat([dt, dtr], ignore_index=True)
-    name = '_pake-gaussian-fits_triple'
-    dt.to_csv(P(filename).parent.joinpath(P(filename).stem + name + '.txt'), index=False)
+    dt.to_csv(P(filename).parent.joinpath(P(filename).stem + '_pake-gaussian-fits_single.txt'), index=False)
 
 
 def plot(filename, numplots=-1):
-    name = '_pake-gaussian-fits_triple'
+    name = '_pake-gaussian-fits_single'
 
     if not P(filename).stem.endswith(name):
         filename = P(filename).parent.joinpath(P(filename).stem + name + '.txt')
@@ -296,6 +299,8 @@ def plot(filename, numplots=-1):
     expts = list(set(dres['time_pt'].dropna()))
     rstr = dres.loc[dres['name']=='r']['value'].values[0].lstrip('[array([').rstrip('])').split(',')
     r = np.array([float(ii.strip()) for ii in rstr])
+    singlestr = dres.loc[dres['name']=='single']['value'].values[0].lstrip('[array([').rstrip('])').split(',')
+    single = np.array([float(ii.strip()) for ii in singlestr])
     expts.sort()
     fig, ax = plt.subplots()
     times = np.array(ast.literal_eval(P(filename).parent.joinpath('times.txt').read_text()))
@@ -328,11 +333,12 @@ def plot(filename, numplots=-1):
 
         if ind == 0:
             # div = double_gaussian(r, r0, w0, r1, w1, a)
-            div = triple_gaussian(r, r0, w0, r1, w1, r2, w2, a, b)
+            # div = triple_gaussian(r, r0, w0, r1, w1, r2, w2, a, b)
+            div = triple_gaussian(r, r0, w0, r1, w1, r2, w2, a, 0) 
             ca = amp
         
-        g = amp * triple_gaussian(r, r0, w0, r1, w1, r2, w2, a, b) 
-        ax.plot(r, 25 * np.max(times) * g / np.sum(g) + np.max(times) / numplots * c,
+        g = amp * triple_gaussian(r, r0, w0, r1, w1, r2, w2, a, 0) 
+        ax.plot(r,   np.max(times) / numplots * (np.max(times) * g / np.sum(g) + c),
                 )
 
         c += 1
@@ -347,17 +353,13 @@ def plot(filename, numplots=-1):
     tstart = pre + on
     # fraca *= 100
     # fracb *= 100
+    # popt, pcov = curve_fit(exponential, times[times > tstart], distances[times > tstart], p0=[np.min(distances), np.max(distances), np.max(times)])
     ag.axvspan(pre, pre + on, facecolor='#00A7CA', alpha=0.25, label='Laser on')
-    plott = np.linspace(np.min(times), np.max(times), len(fraca))
-    ag.scatter(plott, 100 * fraca, c='red', label='a frac')
-    ag.scatter(plott, 100 * fracb, c='green', label='b frac')
-    ag.scatter(plott,
-               100 * (1 - (1 - np.array(fraca)) * (1 - np.array(fracb))), c='k', label='Unfolded %')
-    popt, pcov = curve_fit(exponential, plott[plott > tstart], 
-                           100 * (1 - (1 - np.array(fraca)) * (1 - np.array(fracb)))[plott > tstart],
-                           p0=[0, 100, 100])
-    ag.plot(plott[plott > tstart], exponential(plott[plott > tstart], *popt), 
-            ls='--', c='r', label=rf'$\tau={popt[-1]:.1f}\,$s')
+    ag.scatter(np.linspace(np.min(times), np.max(times), len(fraca)), fraca, c='red', label='a frac')
+    ag.scatter(np.linspace(np.min(times), np.max(times), len(fracb)), fracb, c='green', label='b frac')
+    ag.scatter(np.linspace(np.min(times), np.max(times), len(fracb)),
+               1 - (1 - np.array(fraca)) * (1 - np.array(fracb)), c='k', label='Unfolded %')
+    # ag.plot(times[times > tstart], exponential(times[times > tstart], *popt), ls='--', c='r', label=rf'$\tau={popt[-1]:.1f}\,$s')
     ag.set_xlabel('Time (s)')
     ag.set_ylabel(r'Extended fraction (\%)')
     ag.legend(handlelength=0.75, labelspacing=0.25)
@@ -366,11 +368,11 @@ def plot(filename, numplots=-1):
     ax.set_ylabel('Time (s)')
     ax.set_xlabel('Distance (nm)')
 
-    fig.savefig(P(filename).parent.joinpath(P(filename).stem + "_distVtime_triple.png"), dpi=600)
-    fg.savefig(P(filename).parent.joinpath(P(filename).stem + "_fracVtime_triple.png"), dpi=600)
+    fig.savefig(P(filename).parent.joinpath(P(filename).stem + "_distVtime_single.png"), dpi=600)
+    fg.savefig(P(filename).parent.joinpath(P(filename).stem + "_fracVtime_single.png"), dpi=600)
 
 if __name__ == "__main__":
     filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/30/FMN sample/stable/288.4/M01_288.4K_100mA_stable_pre30s_on10s_off470s_25000avgs_filtered_batchDecon.feather'
-    main(filename, ri=1.2, rf=8, plotfield=25, numplots=8)
-    plot(filename, numplots=8)
+    main(filename, ri=1.2, rf=8, numplots=4)
+    plot(filename, numplots=4)
     plt.show()

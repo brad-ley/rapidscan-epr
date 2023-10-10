@@ -156,7 +156,7 @@ def main(filename, ri, rf):
                 adjusted_spectra[ind, :] = coldat[center - int((h-l)/2):center + int((h-l)/2) + 1]
     ### CENTERING ### 
 
-    _data = np.loadtxt(P('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/results_room_T_0.5_-7.72.txt'), delimiter=',')
+    _data = np.loadtxt(P('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/results_room_T_0.45_-7.72.txt'), delimiter=',')
     # fig, ax = plt.subplots(figsize=(6,4), layout='constrained')
     B_full = _data[0, :] * 10 # G
     B_full -= B_full[np.argmax(_data[-1, :])] # center to peak, use narrowest peak because weird stuff happens at broadest
@@ -183,11 +183,11 @@ def main(filename, ri, rf):
 
     # add with tuples: (NAME VALUE VARY MIN  MAX  EXPR  BRUTE_STEP)
     params = lmfit.create_params(
-            r00 = dict(value=2.3, vary=False, min=1.5, max=4),
+            r00 = dict(value=2., vary=False, min=1.5, max=4),
             w00 = dict(value=0.65, vary=False, min=0.05, max=2),
             r01 = dict(value=4.5, vary=False, min=2.35, max=5),
             w01 = dict(value=0.21, vary=False, min=0.05, max=1),
-            a   = dict(value=0.5, vary=True, min=0, max=10),
+            a   = dict(value=0.05, vary=True, min=0, max=1),
             amp = dict(value=np.max(adjusted_spectra[-1, :]) / 
                        np.max(interp_dists), min=0),
             # offset=dict(value=-np.min(interp_dists)),
@@ -240,6 +240,7 @@ def plot(filename):
     fig, ax = plt.subplots()
     
     c = 0
+    ca = 1
     distances = []
     # div = gaussian(r, 
     #             thi.loc[thi['name']=='r0']['value'].values[0],
@@ -253,11 +254,13 @@ def plot(filename):
         r01 = float(this.loc[this['name']=='r01']['value'].values[0])
         w01 = float(this.loc[this['name']=='w01']['value'].values[0])
         a = float(this.loc[this['name']=='a']['value'].values[0])
+        amp = float(this.loc[this['name']=='amp']['value'].values[0])
 
         if ind == 0:
             div = double_gaussian(r, r00, w00, r01, w01, a)
+            ca = amp
 
-        ax.plot(r, double_gaussian(r, r00, w00, r01, w01, a) + c * 0.2,
+        ax.plot(r, amp * double_gaussian(r, r00, w00, r01, w01, a) + c * ca * 0.2,
                label=f"{r01:.2f} nm")
         # ax.plot(r, gaussian(r, 
         #         this.loc[this['name']=='r0']['value'].values[0], 
@@ -295,7 +298,7 @@ def plot(filename):
     # aa.legend()
 
 if __name__ == "__main__":
-    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/30/FMN sample/stable/279.6/M01_279.6K_unstable_pre30s_on10s_off470s_25000avgs_filtered_batchDecon.feather'
+    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/30/FMN sample/stable/279.6 sqrt copy/M01_279.6K_unstable_pre30s_on10s_off470s_25000avgs_filtered_batchDecon.feather'
     main(filename, ri=1.2, rf=6.4)
     plot(filename)
     plt.show()

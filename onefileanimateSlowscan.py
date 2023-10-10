@@ -24,30 +24,44 @@ from fitsVStime import plotfits
 
 if __name__ == "__main__":
 # if False:
-    plt.style.use(['science'])
+    # plt.style.use(['science'])
     # rc('text.latex', preamble=r'\usepackage{cmbright}')
-    rcParams = [
-        # ['font.family', 'sans-serif'],
-        ['font.size', 14],
-        ['axes.linewidth', 1],
-        ['lines.linewidth', 2],
-        ['xtick.major.size', 5],
-        ['xtick.major.width', 1],
-        ['xtick.minor.size', 2],
-        ['xtick.minor.width', 1],
-        ['ytick.major.size', 5],
-        ['ytick.major.width', 1],
-        ['ytick.minor.size', 2],
-        ['ytick.minor.width', 1],
-        ]
-    plt.rcParams.update(dict(rcParams))
+    # rcParams = [
+    #     ['font.family', 'sans-serif'],
+    #     ['font.size', 14],
+    #     ['axes.linewidth', 1],
+    #     ['lines.linewidth', 2],
+    #     ['xtick.major.size', 5],
+    #     ['xtick.major.width', 1],
+    #     ['xtick.minor.size', 2],
+    #     ['xtick.minor.width', 1],
+    #     ['ytick.major.size', 5],
+    #     ['ytick.major.width', 1],
+    #     ['ytick.minor.size', 2],
+    #     ['ytick.minor.width', 1],
+    #     ]
+    # plt.rcParams.update(dict(rcParams))
+    plt.style.use(['science'])
+    rc('text.latex', preamble=r'\usepackage{cmbright}')
+    plt.rcParams['font.family'] = 'sans-serif'
+    plt.rcParams['font.size'] = 18
+    plt.rcParams['axes.linewidth'] = 1.5
+    plt.rcParams['xtick.major.size'] = 6
+    plt.rcParams['xtick.major.width'] = 1.5
+    plt.rcParams['xtick.minor.size'] = 3
+    plt.rcParams['xtick.minor.width'] = 1
+    plt.rcParams['ytick.major.size'] = 6
+    plt.rcParams['ytick.major.width'] = 1.5
+    plt.rcParams['ytick.minor.size'] = 3
+    plt.rcParams['ytick.minor.width'] = 1
+    plt.rcParams['lines.linewidth'] = 4
 
 
 def process(filename,
             plotfields,
             ontimes=(0, -1),
             deconvolved=True,
-            makenew=True,
+            makenew=False,
             showfits=True,
             animate=True):
     # fig, ax = plt.subplots(figsize=(8, 6))
@@ -141,28 +155,26 @@ def process(filename,
 
             #     for ang in np.linspace(0, np.pi, nang)
             # ]
-            # abss = [
-            #         np.sum(np.abs(np.imag(np.exp(-1j * ang) * M)[:n] - 
-            #                       np.imag(np.exp(-1j * ang) * M)[-n:]))
+            abss = [
+                    np.sum(np.abs(np.imag(np.exp(-1j * ang) * M)[:n] - 
+                                  np.imag(np.exp(-1j * ang) * M)[-n:]))
 
-            #         for ang in np.linspace(0, np.pi, nang)
-            #         ]
+                    for ang in np.linspace(0, np.pi, nang)
+                    ]
 
-            # ang = np.linspace(0, np.pi, nang)[np.argmax(abss)]
             ### LiPC ###
-            # ang = np.linspace(0, np.pi, nang)[np.argmin(abss)]
+            ang = np.linspace(0, np.pi, nang)[np.argmin(abss)]
             # ang = np.linspace(0, np.pi, nang)[np.argmax(abss)]
-            ### LiPC ###
             # M = M * np.exp(-1j * ang)
-
-            if np.mean(np.imag(M)) < np.mean(np.imag(M[:32])):
-
             ### LiPC ###
 
+            # if np.mean(np.imag(M)) < np.mean(np.imag(M[:32])):
+
+            ### LiPC ###
             # if np.argmin(np.imag(M)) < np.argmax(np.imag(M)):
             ### LiPC ###
 
-            # if np.mean(np.imag(M)) < np.mean(np.imag(M)[:n]):
+            if np.mean(np.imag(M)) < np.mean(np.imag(M)[:n]):
                 M = M * np.exp(-1j * np.pi)
             ### for phasing LiPC ###
             R = np.imag(M)
@@ -249,30 +261,30 @@ def process(filename,
             fit, = ax.plot(x, yy, c=cmap(ts[0]), ls='--')
 
         # f, a = plt.subplots(layout='constrained')
-        # f, a = plt.subplots()
+        f, a = plt.subplots()
 
         c = 0
 
-        # for i in range(1, len(loopdata[0, :]), int(len(loopdata[0, :])/ 7)):
-        #     # xx = np.copy(x) - (x[np.argmin(loopdata[:, i])] + x[np.argmax(loopdata[:, i])])/2
-        #     xx = x - x[np.argmax(loopdata[:, i])]
-        #     lim = 2.5
-        #     a.plot(xx[np.abs(xx) < lim], loopdata[:, i][np.abs(xx) < lim] + 1.2 * c, c='k')
-        #     a.plot(xx[np.abs(xx) < lim], fitdata[:, i][np.abs(xx) < lim] + 1.2 * c, c='r', ls='--')
-        #     # a.plot(xx, loopdata[:, i] + c / 3, c='k')
-        #     c += 1
-        # a.annotate('', (-lim * 1.15, 8), xytext=(-lim*1.15, 0),
-        #            arrowprops={'arrowstyle':'-|>', 'facecolor':'black'})
-        # a.annotate(r'$t=0\rightarrow120\,$s', (-lim*1.4, 0.5), 
-        #            rotation=90)
-        # a.annotate('A)', xy=(-lim * 1.5,8.3), transform=a.transAxes)
+        for i in range(1, len(loopdata[0, :]), int(len(loopdata[0, :])/ 7)):
+            # xx = np.copy(x) - (x[np.argmin(loopdata[:, i])] + x[np.argmax(loopdata[:, i])])/2
+            xx = x - x[np.argmax(loopdata[:, i])]
+            lim = 2.5
+            a.plot(xx[np.abs(xx) < lim], loopdata[:, i][np.abs(xx) < lim] + 1.2 * c, c='k')
+            a.plot(xx[np.abs(xx) < lim], fitdata[:, i][np.abs(xx) < lim] + 1.2 * c, c='r', ls='--')
+            # a.plot(xx, loopdata[:, i] + c / 3, c='k')
+            c += 1
+        a.annotate('', (-lim * 1.15, 8), xytext=(-lim*1.15, 0),
+                   arrowprops={'arrowstyle':'-|>', 'facecolor':'black'})
+        a.annotate(r'$t=0\rightarrow120\,$s', (-lim*1.4, 0.5), 
+                   rotation=90)
+        a.annotate('a)', xy=(-lim * 1.5,8.3), transform=a.transAxes)
 
-        # a.set_ylabel('Signal (arb. u.)')
-        # a.set_xlabel('Field (G)')
-        # a.set_xlim(left=-1.6*lim)
+        a.set_ylabel('Signal (arb. u.)')
+        a.set_xlabel('Field (G)')
+        a.set_xlim(left=-1.6*lim)
         # a.set_ylim(top=4.5)
 
-        # f.savefig('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/Shared drives/Brad-Tonda UCSB/2022-Quasi-optical Sample Holder Solution for sub-THz Electron Spin Resonance Spectrometers/Figures/waterfall.png', dpi=1200)
+        f.savefig('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/Shared drives/Brad-Tonda UCSB/2022-Quasi-optical Sample Holder Solution for sub-THz Electron Spin Resonance Spectrometers/Figures/waterfall.png', dpi=1200)
 
         ax.axvspan(x[0], x[n], facecolor='k', alpha=0.25)
         # SNR = [np.max(y) / np.std(y[:n])]
@@ -340,7 +352,7 @@ def process(filename,
 
 
 if __name__ == "__main__":
-    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/30/FMN sample/stable/279.6/M01_279.6K_unstable_pre30s_on10s_off470s_25000avgs_filtered.dat'
+    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/30/FMN sample/stable/279.6/M01_279.6K_unstable_pre30s_on10s_off470s_25000avgs_filtered_batchDecon.feather'
 
     if not P(filename).stem.endswith('Decon'):
         filename = P(filename).parent.joinpath(
@@ -348,7 +360,7 @@ if __name__ == "__main__":
             # P(filename).stem + '_batchDecon.dat')
     ### LiPC ###
     # plotfields = 0.9 + 6 * np.array([-1, 1])
-    # plotfields = 11.4 + 10 * np.array([-1, 1])
+    # plotfields = -3 + 10 * np.array([-1, 1])
     ### LiPC ###
     plotfields = 7.5 + np.array([-20, 20])
     try:
@@ -372,8 +384,8 @@ if __name__ == "__main__":
         ]))
         ontimes = (pre, pre + on)
     except ValueError:
-        # ontimes = (0, 28)
-        ontimes = (0, 25)
+        ontimes = (0, 28)
+        # ontimes = (0, 25)
         print(
             f"Could not detect the experiment timings.\nDefaulting to ON at {ontimes[0]:.1f} s and OFF at {ontimes[1]:.1f} s."
         )
@@ -381,7 +393,7 @@ if __name__ == "__main__":
                          plotfields,
                          ontimes=ontimes,
                          deconvolved=True,
-                         makenew=True,
+                         makenew=False,
                          showfits=True,
                          animate=True)
 
