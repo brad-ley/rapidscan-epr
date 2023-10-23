@@ -11,6 +11,7 @@ from tqdm import tqdm
 from functools import partial
 
 import PIL
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import multiprocessing as mp
 import numpy as np
@@ -23,9 +24,10 @@ from matplotlib import rc
 
 if __name__ == "__main__":
     plt.style.use(['science'])
-    rc('text.latex', preamble=r'\usepackage{cmbright}')
+    # rc('text.latex', preamble=r'\usepackage{cmbright}')
     rcParams = [
-                ['font.family', 'sans-serif'], ['font.size', 14],
+                # ['font.family', 'sans-serif'], ['font.size', 14],
+                ['font.family', 'serif'], ['font.size', 14],
                 ['axes.linewidth', 1], ['lines.linewidth', 2],
                 ['xtick.major.size', 5], ['xtick.major.width', 1],
                 ['xtick.minor.size', 2], ['xtick.minor.width', 1],
@@ -233,9 +235,9 @@ def main(filename, ri, rf, plotfield=30, numplots=-1):
 
     # add with tuples: (NAME VALUE VARY MIN  MAX  EXPR  BRUTE_STEP)
     params = lmfit.create_params(
-            r0=dict(value=1.9, vary=False, min=1.5, max=4),
+            r0=dict(value=2., vary=False, min=1.5, max=4),
             w0=dict(value=0.2, vary=False, min=0.25, max=1.5),
-            r1=dict(value=4., vary=False, min=2.1, max=7),
+            r1=dict(value=5., vary=False, min=2.1, max=7),
             w1=dict(value=0.2, vary=False, min=0.1, max=0.9),
             r2=dict(value=2.7, vary=False, min=2.35, max=6),
             w2=dict(value=0.5, vary=False, min=0.05, max=0.9),
@@ -260,23 +262,42 @@ def main(filename, ri, rf, plotfield=30, numplots=-1):
     end = time.perf_counter()
     print(f"Elapsed (after compilation) = {end-start:.2f} s")
     
-    fig, ax = plt.subplots(figsize=(6,4))
+    fig, ax = plt.subplots()
+    ax.set_prop_cycle( plt.cycler("color", plt.cm.cool(np.linspace(0,1,numplots))) )
     c = 0
 
     if numplots == -1:
         numplots = len(p)
 
+    ax.axvline(np.mean(B[B > 0]), c='k', alpha=0.5)
     for ind in range(0, len(p), ceil(len(p)/numplots)):
         res = p[ind]
-        spectrum = adjusted_spectra_zeros[inds[ind], :]
-        line, = ax.plot(B, spectrum/np.max(spectrum) + c)
+        # spectrum = adjusted_spectra_zeros[inds[ind], :]
+        # line, = ax.plot(B, spectrum/np.max(spectrum) + c)
+        spectrum = adjusted_spectra[inds[ind], :]
+        line, = ax.plot(B[:len(adjusted_spectra[0, :])] - np.mean(B[:len(adjusted_spectra[0, :])])
+                        + c, spectrum)
         rp = res.params.valuesdict()
         out = ret(res.params, interp_dists, single, r)
         # fwhm_ind = np.where(out > 0.5 * np.max(out))[0]
         # fwhm = np.abs(specB[fwhm_ind[0]] - specB[fwhm_ind[-1]])
-        ax.plot(B, out/np.max(spectrum) + c, label=f'', c=line.get_color(), ls="--")
-        ax.plot(B, single/np.max(spectrum) + c, c=line.get_color(), ls=":")
-        c += 0.2
+
+        # ax.plot(B, out/np.max(spectrum) + c, label=f'', c=line.get_color(), ls="--")
+        # ax.plot(B, single/np.max(spectrum) + c, c=line.get_color(), ls=":")
+        # c += 0.025
+        c += np.max(B)
+
+    ax.set_xlabel('Field (G)')
+    ax.set_ylabel('EPR signal (arb. u)')
+    ax.text(0.05, 0.875, 'b)', transform=ax.transAxes)
+    ax.set_ylim(top=1.05)
+    ax.set_yticks([0,1])
+
+    times = np.array(ast.literal_eval(P(filename).parent.joinpath('times.txt').read_text()))
+    norm = mpl.colors.Normalize(vmin=0, vmax=np.max(times))
+    fig.colorbar(mpl.cm.ScalarMappable(cmap=plt.cm.cool, norm=norm), ax=ax, 
+                 label='Time (s)')
+    fig.savefig(P(filename).parent.joinpath('raw_stacked.png'), dpi=1200)
 
     dtr = pd.DataFrame(columns=['name', 'value'])
     dtr.loc[0, 'name'] = 'r'
@@ -311,7 +332,13 @@ def plot(filename, numplots=-1):
 
     if numplots == -1:
         numplots = len(expts)
+
+    norm = mpl.colors.Normalize(vmin=0, vmax=np.max(times))
+    fig.colorbar(mpl.cm.ScalarMappable(cmap=plt.cm.cool, norm=norm), ax=ax, 
+                 label='Time (s)')
     times = times[np.arange(0, len(times), ceil(len(times) / numplots))]
+
+    ax.set_prop_cycle( plt.cycler("color", plt.cm.cool(np.linspace(0,1,numplots))) )
 
     for ind in range(0, len(expts), ceil(len(expts) / numplots)):
         exp = expts[ind]
@@ -332,8 +359,9 @@ def plot(filename, numplots=-1):
             ca = amp
         
         g = amp * triple_gaussian(r, r0, w0, r1, w1, r2, w2, a, b) 
-        ax.plot(r, 25 * np.max(times) * g / np.sum(g) + np.max(times) / numplots * c,
-                )
+        # ax.plot(r, 25 * np.max(times) * g / np.sum(g) + np.max(times) / numplots * c,
+        #         )
+        ax.plot(r, g + 0.025 * c,)
 
         c += 1
 
@@ -349,8 +377,8 @@ def plot(filename, numplots=-1):
     # fracb *= 100
     ag.axvspan(pre, pre + on, facecolor='#00A7CA', alpha=0.25, label='Laser on')
     plott = np.linspace(np.min(times), np.max(times), len(fraca))
-    ag.scatter(plott, 100 * fraca, c='red', label='a frac')
-    ag.scatter(plott, 100 * fracb, c='green', label='b frac')
+    # ag.scatter(plott, 100 * fraca, c='red', label='a frac')
+    # ag.scatter(plott, 100 * fracb, c='green', label='b frac')
     ag.scatter(plott,
                100 * (1 - (1 - np.array(fraca)) * (1 - np.array(fracb))), c='k', label='Unfolded %')
     popt, pcov = curve_fit(exponential, plott[plott > tstart], 
@@ -363,14 +391,14 @@ def plot(filename, numplots=-1):
     ag.legend(handlelength=0.75, labelspacing=0.25)
     ag.set_ylim(bottom=0)
 
-    ax.set_ylabel('Time (s)')
+    ax.set_ylabel('$P(r)$')
     ax.set_xlabel('Distance (nm)')
 
     fig.savefig(P(filename).parent.joinpath(P(filename).stem + "_distVtime_triple.png"), dpi=600)
     fg.savefig(P(filename).parent.joinpath(P(filename).stem + "_fracVtime_triple.png"), dpi=600)
 
 if __name__ == "__main__":
-    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/30/FMN sample/stable/288.4/M01_288.4K_100mA_stable_pre30s_on10s_off470s_25000avgs_filtered_batchDecon.feather'
-    main(filename, ri=1.2, rf=8, plotfield=25, numplots=8)
-    plot(filename, numplots=8)
+    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/30/FMN sample/stable/279.6 sqrt copy/M01_279.6K_unstable_pre30s_on10s_off470s_25000avgs_filtered_batchDecon.feather'
+    main(filename, ri=1.2, rf=8, plotfield=25, numplots=16)
+    plot(filename, numplots=12)
     plt.show()

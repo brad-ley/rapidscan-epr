@@ -15,9 +15,9 @@ from matplotlib import rc
 
 if __name__ == "__main__":
     plt.style.use(['science'])
-    rc('text.latex', preamble=r'\usepackage{cmbright}')
+    # rc('text.latex', preamble=r'\usepackage{cmbright}')
     rcParams = [
-        ['font.family', 'sans-serif'],
+        ['font.family', 'serif'],
         ['font.size', 14],
         ['axes.linewidth', 1],
         ['lines.linewidth', 2],
@@ -80,15 +80,20 @@ def main(filename):
     temp += 273.15
     k = np.log(1 / times)
     invT = 1 / temp
-    a.scatter(invT, k, color='k', label='Data')
+    a.scatter(invT, k, color='k', label='Refolding rate')
     lowerr = np.log(1 / times) - np.log(1 / (times + timeserr))
     uperr = np.log(1 / (times - timeserr)) - np.log(1 / times)
     errs = np.vstack((lowerr, uperr))
     # a.errorbar(invT, k, yerr=errs, color='k', fmt='o', label='Data')
     fitx = np.linspace(np.min(invT), np.max(invT), 1000)
     popt, pcov = curve_fit(lin, invT, k)
+    print(popt[0] * -1.987 / 1e3, 2*np.sqrt(np.diag(pcov)[0]) * 1.987 / 1e3)
     a.plot(fitx, lin(fitx, *popt), ls='--', c='r', label=rf'$E_a={{{-1.987*popt[0]/1e3:.1f}}}$ kcal/mol')
-    a.legend()
+    a.legend(
+         handletextpad=0.25,
+         handlelength=1,
+         labelspacing=0.25,
+        )
 
 
     # color = 'tab:blue'
@@ -98,7 +103,7 @@ def main(filename):
     # ax2.tick_params(axis='y', labelcolor=color)
 
     a.set_xlabel('1/T (K$^{-1}$)')
-    a.set_ylabel('Reaction rate ($ln(k)$)')  # we already handled the x-label with ax1
+    a.set_ylabel('$ln(k)$')  # we already handled the x-label with ax1
     f.savefig(P(filename).parent.joinpath('TAUvT_scatter.png'), dpi=1200)
 
 

@@ -30,7 +30,7 @@ if __name__ == "__main__":
 
 fig, ax = plt.subplots()
 
-def decompose(mat, times):
+def decompose(mat, times, k=2):
 
     mT = np.copy(mat)
     mu = mT.mean(axis=1, keepdims=True)
@@ -39,12 +39,15 @@ def decompose(mat, times):
 
     # ff.savefig('/Users/Brad/Desktop/princpal_comps_297.5.png', dpi=600)
 
-    k = 4
-
     v = V[:, :k]
     PCAmT = v.T @ mT
 
     tot = np.zeros(np.shape(PCAmT[:, :])[-1])
+
+    ax.axvspan(30, 40, 
+            facecolor='#00A7CA',
+               alpha=0.25,
+               label='Laser on',)
 
     for ii in range(k):
         val = PCAmT[ii, :]
@@ -69,6 +72,7 @@ def decompose(mat, times):
     # ah.plot((V[:, :o] @ V[:, :o].T @ mT + mu)[:, 200], label='200 ' + str(o))
     # ah.plot((V[:, :o] @ V[:, :o].T @ mT + mu)[:, 300], label='300 ' + str(o))
     # ah.legend()
+
     return PCAmT, V, E
 
 
@@ -93,8 +97,10 @@ def main(filename):
     # plt.show()
 
     ### CENTERING ### 
+
     if True:
         dat = np.zeros(((h-l), len(cols)))
+
         for ind, col in enumerate(cols):
             # center = np.argmax(mat[col][l:h].to_numpy()) + l
             tdat = mat[col][l:h].to_numpy()
@@ -121,27 +127,44 @@ def main(filename):
     times = np.array(
             ast.literal_eval(P(filename).parent.joinpath('times.txt').read_text()))
 
-    PCA, V, E = decompose(dat, times)
+    k = 2
+    PCA, V, E = decompose(dat, times, k=k)
     fh, ah = plt.subplots()
     fg, ag = plt.subplots()
-    ag.plot(range(1, len(E) + 1), E / len(E))
-    ah.plot(B, V[:, 0] + 0.1 * 0, label='$C_1$')
-    ah.plot(B, V[:, 1] + 0.1 * 1, label='$C_2$')
-    ah.plot(B, V[:, 2] + 0.1 * 2, label='$C_3$')
-    ah.plot(B, V[:, 3] + 0.1 * 3, label='$C_4$')
+    ratioE = [E[i] / E[i + 1] if i < len(E) - 1 else 0 for i, _ in enumerate(E)]
+    ratioE = ratioE[:-2]
+    # ag.scatter(range(1, len(E)), E[:-1])
+    ag.scatter(range(len(ratioE)), ratioE)
+    ag.set_yscale('log')
+    agi = ag.inset_axes([0.25, 0.6, 0.6, 0.3], transform=ag.transAxes)
+    agi.set_yscale('log')
+    agi.scatter(range(len(ratioE[:6])), ratioE[:6])
+    ag.indicate_inset_zoom(agi, edgecolor='black')
+    ag.set_ylabel(r'Log$(\frac{\lambda_i}{\lambda_{i+1}})$')
+    ag.set_xlabel('Index $n$')
 
-    for i in range(4):
+    for i in range(k):
+        ah.plot(B, V[:, i] + 0.1 * i, label=f'$C_{i+1}$')
         popt, pcov = curve_fit(lorentzian, B, V[:, i])
+        print(popt)
         ah.plot(B, lorentzian(B, *popt) + 0.1 * i, label='fit')
     ah.set_xlabel('Field (G)')
     ah.set_ylabel('Amplitude')
-    ah.legend()
+    ah.legend(
+            markerfirst=False,
+            handlelength=1
+            )
     fh.savefig(P(filename).parent.joinpath('components.png'), dpi=600)
+    fg.savefig(P(filename).parent.joinpath('eigenvalues.png'), dpi=600)
     # PCA = decompose(dat, times)
     # ax.set_xlabel('Time (s)')
     ax.set_xlabel('Time (s)')
     ax.set_ylabel('Amplitude')
-    ax.legend()
+    ax.legend(
+            markerfirst=False,
+            handlelength=1
+            )
+    print(P(filename).parent.joinpath('PCA.png'))
     fig.savefig(P(filename).parent.joinpath('PCA.png'), dpi=600)
 
 

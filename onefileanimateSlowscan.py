@@ -23,38 +23,20 @@ from filterReal import isdigit
 from fitsVStime import plotfits
 
 if __name__ == "__main__":
-# if False:
-    # plt.style.use(['science'])
-    # rc('text.latex', preamble=r'\usepackage{cmbright}')
-    # rcParams = [
-    #     ['font.family', 'sans-serif'],
-    #     ['font.size', 14],
-    #     ['axes.linewidth', 1],
-    #     ['lines.linewidth', 2],
-    #     ['xtick.major.size', 5],
-    #     ['xtick.major.width', 1],
-    #     ['xtick.minor.size', 2],
-    #     ['xtick.minor.width', 1],
-    #     ['ytick.major.size', 5],
-    #     ['ytick.major.width', 1],
-    #     ['ytick.minor.size', 2],
-    #     ['ytick.minor.width', 1],
-    #     ]
-    # plt.rcParams.update(dict(rcParams))
     plt.style.use(['science'])
-    rc('text.latex', preamble=r'\usepackage{cmbright}')
-    plt.rcParams['font.family'] = 'sans-serif'
-    plt.rcParams['font.size'] = 18
-    plt.rcParams['axes.linewidth'] = 1.5
-    plt.rcParams['xtick.major.size'] = 6
-    plt.rcParams['xtick.major.width'] = 1.5
-    plt.rcParams['xtick.minor.size'] = 3
+    # rc('text.latex', preamble=r'\usepackage{cmbright}')
+    plt.rcParams['font.family'] = 'serif'
+    plt.rcParams['font.size'] = 14
+    plt.rcParams['axes.linewidth'] = 1
+    plt.rcParams['xtick.major.size'] = 5
+    plt.rcParams['xtick.major.width'] = 1
+    plt.rcParams['xtick.minor.size'] = 2
     plt.rcParams['xtick.minor.width'] = 1
-    plt.rcParams['ytick.major.size'] = 6
-    plt.rcParams['ytick.major.width'] = 1.5
-    plt.rcParams['ytick.minor.size'] = 3
+    plt.rcParams['ytick.major.size'] = 5
+    plt.rcParams['ytick.major.width'] = 1
+    plt.rcParams['ytick.minor.size'] = 2
     plt.rcParams['ytick.minor.width'] = 1
-    plt.rcParams['lines.linewidth'] = 4
+    plt.rcParams['lines.linewidth'] = 2
 
 
 def process(filename,
@@ -352,7 +334,7 @@ def process(filename,
 
 
 if __name__ == "__main__":
-    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/30/FMN sample/stable/279.6/M01_279.6K_unstable_pre30s_on10s_off470s_25000avgs_filtered_batchDecon.feather'
+    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/30/FMN sample/stable/279.6 sqrt copy/M01_279.6K_unstable_pre30s_on10s_off470s_25000avgs_filtered_batchDecon.feather'
 
     if not P(filename).stem.endswith('Decon'):
         filename = P(filename).parent.joinpath(

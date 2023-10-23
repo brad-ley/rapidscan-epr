@@ -12,24 +12,24 @@ from scipy.integrate import cumtrapz
 from scipy.optimize import curve_fit as cf
 from filterReal import isdigit
 
-plt.style.use(['science'])
-rc('text.latex', preamble=r'\usepackage{cmbright}')
-plt.rcParams['font.family'] = 'sans-serif'
-plt.rcParams['font.size'] = 18
-plt.rcParams['axes.linewidth'] = 1.5
-plt.rcParams['xtick.major.size'] = 6
-plt.rcParams['xtick.major.width'] = 1.5
-plt.rcParams['xtick.minor.size'] = 3
-plt.rcParams['xtick.minor.width'] = 1
-plt.rcParams['ytick.major.size'] = 6
-plt.rcParams['ytick.major.width'] = 1.5
-plt.rcParams['ytick.minor.size'] = 3
-plt.rcParams['ytick.minor.width'] = 1
-plt.rcParams['lines.linewidth'] = 4
-if False:
+# plt.style.use(['science'])
+# rc('text.latex', preamble=r'\usepackage{cmbright}')
+# plt.rcParams['font.family'] = 'sans-serif'
+# plt.rcParams['font.size'] = 18
+# plt.rcParams['axes.linewidth'] = 1.5
+# plt.rcParams['xtick.major.size'] = 6
+# plt.rcParams['xtick.major.width'] = 1.5
+# plt.rcParams['xtick.minor.size'] = 3
+# plt.rcParams['xtick.minor.width'] = 1
+# plt.rcParams['ytick.major.size'] = 6
+# plt.rcParams['ytick.major.width'] = 1.5
+# plt.rcParams['ytick.minor.size'] = 3
+# plt.rcParams['ytick.minor.width'] = 1
+# plt.rcParams['lines.linewidth'] = 4
+if True:
     plt.style.use(['science'])
-    rc('text.latex', preamble=r'\usepackage{cmbright}')
-    plt.rcParams['font.family'] = 'sans-serif'
+    # rc('text.latex', preamble=r'\usepackage{cmbright}')
+    plt.rcParams['font.family'] = 'serif'
     plt.rcParams['font.size'] = 14
     plt.rcParams['axes.linewidth'] = 1
     plt.rcParams['xtick.major.size'] = 5
