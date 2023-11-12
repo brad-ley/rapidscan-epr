@@ -258,6 +258,8 @@ def main(filename, ri, rf, numplots=-1):
     start = time.perf_counter()
     inds = range(0, len(adjusted_spectra_zeros[:, 0]), ceil(len(adjusted_spectra_zeros[:, 0])/num))
     # fitidx = [np.where(np.abs(B) < plotfield)[0][0], np.where(np.abs(B) < plotfield)[0][-1]]
+    print(single.shape, adjusted_spectra_zeros[0, :].shape)
+    raise Exception
     with mp.Pool(processes=mp.cpu_count()) as pool:
         p = pool.map(partial(proc, dists=interp_dists, r=r, params=params, single=single), tqdm(adjusted_spectra_zeros[::ceil(len(adjusted_spectra_zeros[:, 0])/num), :]))
     end = time.perf_counter()

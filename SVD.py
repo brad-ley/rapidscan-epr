@@ -31,11 +31,22 @@ if __name__ == "__main__":
 fig, ax = plt.subplots()
 
 def decompose(mat, times, k=2):
+    """decompose.
 
+    :param mat: matrix to decompose
+    :param times: time vector
+    :param k: principle values to keep
+    :return PCA matrix: subspace matrix that is made up of only k right singular vectors
+    :return V: right singular vector matrix
+    :return E: eigenvalues of SVD
+    """
+    
     mT = np.copy(mat)
     mu = mT.mean(axis=1, keepdims=True)
     mT -= mu
     U, E, V = np.linalg.svd(np.transpose(mT))
+    ff, aa = plt.subplots()
+    aa.scatter(U[:, 0], U[:, 1], c='k')
 
     # ff.savefig('/Users/Brad/Desktop/princpal_comps_297.5.png', dpi=600)
 
@@ -56,6 +67,7 @@ def decompose(mat, times, k=2):
         # ax.plot(times, val, label=f'$C_{ii+1}$')
         # ax.plot(times, val / np.max(val), label=f'$C_{ii+1}$')
         tot += val
+    ax.legend()
     
     # ax.plot(tot+1)
     # fu, au = plt.subplots()

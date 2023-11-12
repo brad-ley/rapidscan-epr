@@ -316,7 +316,7 @@ def plotfits(filename, ontimes=(0, -1)):
     # ax.set_ylim(top=1.25)
     # ax.set_xlim()
     ax.set_ylabel('Fit value (arb. u)')
-    axw.set_ylabel('Linewidth (G)')
+    axw.set_ylabel(r'Linewidth (G) $\propto R^{-3}_{AB}$')
     ### LiPC ###
     ### LiPC ###
     # axw.set_ylim(bottom=0)

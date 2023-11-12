@@ -289,7 +289,7 @@ def main(filename, ri, rf, plotfield=30, numplots=-1):
 
     ax.set_xlabel('Field (G)')
     ax.set_ylabel('EPR signal (arb. u)')
-    ax.text(0.05, 0.875, 'b)', transform=ax.transAxes)
+    # ax.text(0.05, 0.875, 'b)', transform=ax.transAxes)
     ax.set_ylim(top=1.05)
     ax.set_yticks([0,1])
 
