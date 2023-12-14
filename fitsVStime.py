@@ -109,6 +109,7 @@ def plotfits(filename, ontimes=(0, -1)):
     figw, axw = plt.subplots()
 
     fits = np.array(fits)
+
     try:
         # if True:
         peaksname = P(filename).parent.joinpath(
@@ -202,7 +203,7 @@ def plotfits(filename, ontimes=(0, -1)):
                         p0=[
                             np.max(fits[:, i]),
                             -(np.max(fits[:, i]) - np.min(fits[:, 1])),
-                            popt[-1]
+                            np.max(fitt) / 2
                         ])
                     line = axw.scatter(
                         ts[select],

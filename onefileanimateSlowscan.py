@@ -16,6 +16,7 @@ from readDataFile import read
 from scipy.integrate import cumtrapz
 from scipy.optimize import curve_fit as cf
 from scipy.interpolate import interp1d
+from scipy.signal import hilbert
 from statusBar import statusBar
 
 from deconvolveRapidscan import gaussian, lorentzian
@@ -64,8 +65,9 @@ def process(filename,
     ts = np.insert(ts, 0, 0)
     ti = ts[np.argmin(np.abs(ts - ontimes[0]))]
     tf = ts[np.argmin(np.abs(ts - ontimes[1]))]
-
-    # idx = np.where(ts > 58)[0][0]
+    
+    ### for wrapping ###
+    # idx = np.where(ts > 840)[0][0]
     # cols = np.roll(np.array(cols), len(cols) - idx)
 
     cmap = plt.get_cmap('cool')
@@ -84,7 +86,7 @@ def process(filename,
             P(filename).stem + '_combined_peaks.txt')
 
     # SNR = np.empty(len(cols))
-    n = 128
+    n = 1024
 
     if not (name.exists() and fitname.exists()) or makenew:
 
@@ -109,6 +111,10 @@ def process(filename,
         fitparams['B'] = list(B)
         peakdata[:, 0] = ts
 
+
+        nang = 256
+        angs = np.linspace(0, np.pi, nang)
+
         for i in tqdm(range(0, len(cols))):
             c = cols[i]
             disp = dat[c.replace('abs', 'disp')].to_numpy()[l:h]
@@ -116,8 +122,6 @@ def process(filename,
             absorp = dat[c].to_numpy()[l:h]
             # absorp -= np.mean(absorp[:32])
             M = disp + 1j * absorp
-
-            nang = 512
             # disps = [
             #     np.trapz(np.imag(np.exp(-1j * ang) * M))
             #     for ang in np.linspace(0, np.pi, nang)
@@ -130,24 +134,23 @@ def process(filename,
             # ]
 
             ### for phasing LiPC ###
-            # abss = [
-            #     np.abs(
-            #         np.trapz(np.imag(np.exp(-1j * ang) * M)) -
-            #         np.mean(np.imag(np.exp(-1j * ang) * M)[:n]))
+            m = np.array([np.imag(np.exp(-1j * ang) * M) for ang in angs])
+            add = 0
 
-            #     for ang in np.linspace(0, np.pi, nang)
-            # ]
+            if m.shape[-1] % 2 != 0:
+                add = 1
             abss = [
-                    np.sum(np.abs(np.imag(np.exp(-1j * ang) * M)[:n] - 
-                                  np.imag(np.exp(-1j * ang) * M)[-n:]))
-
-                    for ang in np.linspace(0, np.pi, nang)
+                    np.trapz(np.abs(m[:n] - 
+                                  m[-n:]))
                     ]
 
+            # left = m[:, :m.shape[-1]//2]
+            # right = m[:, ::-1][:, :m.shape[-1]//2]
+            # symm = np.trapz((right - left)**2, axis=1)
+
             ### LiPC ###
-            ang = np.linspace(0, np.pi, nang)[np.argmin(abss)]
-            # ang = np.linspace(0, np.pi, nang)[np.argmax(abss)]
-            # M = M * np.exp(-1j * ang)
+            
+            M = M * np.exp(-1j * angs[np.argmin(abss)])
             ### LiPC ###
 
             # if np.mean(np.imag(M)) < np.mean(np.imag(M[:32])):
@@ -194,8 +197,8 @@ def process(filename,
                     np.diag(pcov))))
             except RuntimeError:
                 rawpk2pk = np.max(R) - np.min(R)
-                fitparams[str(c) + '_popt'] = repr([0] * 4 + [0, rawpk2pk])
-                fitparams[str(c) + '_pcov'] = repr([0] * 4 + [0, rawpk2pk])
+                fitparams[str(c) + '_popt'] = repr([0] * len(popt) + [0, rawpk2pk])
+                fitparams[str(c) + '_pcov'] = repr([0] * len(popt) + [0, rawpk2pk])
 
             loopdata[:, i + 1] = R
             # try:
@@ -266,7 +269,7 @@ def process(filename,
         a.set_xlim(left=-1.6*lim)
         # a.set_ylim(top=4.5)
 
-        f.savefig('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/Shared drives/Brad-Tonda UCSB/2022-Quasi-optical Sample Holder Solution for sub-THz Electron Spin Resonance Spectrometers/Figures/waterfall.png', dpi=1200)
+        # f.savefig('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/Shared drives/Brad-Tonda UCSB/2022-Quasi-optical Sample Holder Solution for sub-THz Electron Spin Resonance Spectrometers/Figures/waterfall.png', dpi=1200)
 
         ax.axvspan(x[0], x[n], facecolor='k', alpha=0.25)
         # SNR = [np.max(y) / np.std(y[:n])]
@@ -334,17 +337,13 @@ def process(filename,
 
 
 if __name__ == "__main__":
-    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/30/FMN sample/stable/279.6 sqrt copy/M01_279.6K_unstable_pre30s_on10s_off470s_25000avgs_filtered_batchDecon.feather'
+    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/12/13/287.5K/103mA_23.2kHz_pre30s_on30s_off1170s_40000avgs_filtered.dat'
 
     if not P(filename).stem.endswith('Decon'):
         filename = P(filename).parent.joinpath(
             P(filename).stem + '_batchDecon.feather')
             # P(filename).stem + '_batchDecon.dat')
-    ### LiPC ###
-    # plotfields = 0.9 + 6 * np.array([-1, 1])
-    # plotfields = -3 + 10 * np.array([-1, 1])
-    ### LiPC ###
-    plotfields = 7.5 + np.array([-20, 20])
+    plotfields = 6 + np.array([-20, 20])
     try:
         on = float(''.join([
             ii for ii in ''.join(
@@ -375,7 +374,7 @@ if __name__ == "__main__":
                          plotfields,
                          ontimes=ontimes,
                          deconvolved=True,
-                         makenew=False,
+                         makenew=True,
                          showfits=True,
                          animate=True)
 
@@ -393,3 +392,5 @@ if __name__ == "__main__":
         P(filename).stem + '_combined_fitparams.txt'),
              ontimes=ontimes)
     # plt.show()
+
+
