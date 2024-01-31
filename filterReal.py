@@ -39,11 +39,13 @@ def isdigit(v):
 
 def filt(filename, highpass=0, savgol_window=0, row=1, maxrow=1):
     try:
+        print(P(filename))
         d = pd.read_csv(P(filename),
-                        skiprows=4,
+                        # skiprows=4,
                         sep=', ',
                         on_bad_lines='skip',
-                        engine='python',)
+                        engine='python',
+                        )
 
         dt = 2e-9
         x = np.linspace(0,
@@ -76,8 +78,8 @@ def filt(filename, highpass=0, savgol_window=0, row=1, maxrow=1):
     fft = np.fft.fftshift(np.fft.fft(r, n=n))
     freq = np.fft.fftshift(np.fft.fftfreq(n, d=t[1]-t[0]))
     sign = np.sign(np.argmax(np.abs(fft)) - len(fft)//2)
+    ffreq = freq[np.argmax(np.abs(fft))]
     
-
     if sign == 1:
         fft = fft[freq > highpass]
         freq = freq[freq > highpass]
@@ -86,13 +88,14 @@ def filt(filename, highpass=0, savgol_window=0, row=1, maxrow=1):
         freq = freq[freq < -highpass]
 
     sig = np.fft.ifft(fft, n=len(r))
-    sig = np.abs(sig)
+    # sig = np.abs(sig)
     real = np.real(sig)
     imag = np.imag(sig)
     if savgol_window != 0:
         real = savgol_filter(real, savgol_window, 2)
         imag = savgol_filter(imag, savgol_window, 2)
     sig = real + 1j * imag
+    sig *= np.exp(1j * 2 * np.pi * ffreq * d['time'])
 
     dic = {'time':t, 'avg': sig}
     d = pd.DataFrame(dic)
@@ -106,20 +109,24 @@ def filt(filename, highpass=0, savgol_window=0, row=1, maxrow=1):
     plotsig /= np.max(np.abs(plotsig))
     plott = d['time'][len(d['time'])//4:-len(d['time'])//4]
     plott += np.max(plott)*row*0.1
-    cmap = mpl.cm.get_cmap('cool', maxrow)
+    # cmap = mpl.cm.get_cmap('cool', maxrow)
     # ax.plot(plott, plotsig+i, label=f'{label:.1f}', c='k', alpha=1/3 + 2/3*i/maxrow)
-    ax.plot(plott, np.real(plotsig)+row, c=cmap(row/maxrow))
-    # ax.plot(plott, np.imag(plotsig)+row, c=cmap(row/maxrow))
+    # ax.plot(plott, np.real(plotsig)+row, c=cmap(row/maxrow))
+    phi = np.pi * (1/16)
+    r *= np.exp(-1j * phi)
+    ax.plot(np.real(plotsig))
+    ax.plot(np.imag(plotsig))
+    ax.plot(np.abs(plotsig))
 
 
 if __name__ == "__main__":
-    folder = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/9/13/old avg'
+    folder = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2024/1/22/Understanding data pipeline/'
     if P(folder).is_file():
         folder = P(folder).parent
-    files = [ii for ii in P(folder).iterdir() if ii.name.endswith('s.dat')]
-    files.sort(key=lambda x: float(''.join([xx for xx in [ii for ii in P(x).stem.split('_') if 't=' in ii][0] if (isdigit(xx) or xx=='.')])))
-    times = [float(''.join([ii for ii in [ll for ll in P(bb).stem.split('_') if 't=' in ll][0] if (isdigit(ii) or ii=='.')])) for bb in files]
-    tstep = np.mean(np.diff(times))
+    files = [ii for ii in P(folder).iterdir() if ii.name.endswith('.dat')]
+    # files.sort(key=lambda x: float(''.join([xx for xx in [ii for ii in P(x).stem.split('_') if 't=' in ii][0] if (isdigit(xx) or xx=='.')])))
+    # times = [float(''.join([ii for ii in [ll for ll in P(bb).stem.split('_') if 't=' in ll][0] if (isdigit(ii) or ii=='.')])) for bb in files]
+    # tstep = np.mean(np.diff(times))
     fig, ax = plt.subplots(figsize=(8,6), sharex=True)
     ax.set_ylabel('Signal (arb. u)')
     ax.set_yticklabels([])
@@ -129,9 +136,9 @@ if __name__ == "__main__":
         filt(f, highpass=-900e6, savgol_window=0, row=i, maxrow=len(files))
         statusBar((i+1)/len(files)*100)        
 
-    cmap = mpl.cm.cool
-    norm = mpl.colors.Normalize(vmin=0, vmax=len(files)*tstep)
-    cbar = plt.colorbar(mappable=mpl.cm.ScalarMappable(norm=norm, cmap=cmap))
-    cbar.ax.set_ylabel('Elapsed time (s)')
+    # cmap = mpl.cm.cool
+    # norm = mpl.colors.Normalize(vmin=0, vmax=len(files)*tstep)
+    # cbar = plt.colorbar(mappable=mpl.cm.ScalarMappable(norm=norm, cmap=cmap))
+    # cbar.ax.set_ylabel('Elapsed time (s)')
     plt.savefig(P(folder).joinpath('timestep_plot.png'), dpi=400)
     plt.show()

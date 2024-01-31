@@ -1,5 +1,6 @@
 import os
 import ast
+import sys
 from pathlib import Path as P
 from pathlib import PurePath as PP
 from tqdm import tqdm
@@ -13,7 +14,7 @@ import pyarrow.feather as feather
 from matplotlib import rc
 from matplotlib.animation import FuncAnimation, PillowWriter
 from readDataFile import read
-from scipy.integrate import cumtrapz
+from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import curve_fit as cf
 from scipy.interpolate import interp1d
 from scipy.signal import hilbert
@@ -61,14 +62,14 @@ def process(filename,
             ast.literal_eval(P(filename).parent.joinpath('times.txt').read_text()))
     tstep = np.mean(np.diff(times))
     ts = np.insert(np.diff(times), 0, 0)
-    ts = cumtrapz(ts)
+    ts = cumulative_trapezoid(ts)
     ts = np.insert(ts, 0, 0)
     ti = ts[np.argmin(np.abs(ts - ontimes[0]))]
     tf = ts[np.argmin(np.abs(ts - ontimes[1]))]
     
     ### for wrapping ###
-    # idx = np.where(ts > 840)[0][0]
-    # cols = np.roll(np.array(cols), len(cols) - idx)
+    idx = np.where(ts > 1025)[0][0]
+    cols = np.roll(np.array(cols), len(cols) - idx)
 
     cmap = plt.get_cmap('cool')
     norm = mpl.colors.Normalize(vmin=0, vmax=len(cols) * tstep)
@@ -337,7 +338,10 @@ def process(filename,
 
 
 if __name__ == "__main__":
-    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/12/13/287.5K/103mA_23.2kHz_pre30s_on30s_off1170s_40000avgs_filtered.dat'
+    try:
+        filename = sys.argv[1]
+    except IndexError:
+        filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2024/1/26/414 mutant/282.98K/103mA_pre30s_on30s_off1130s_25000avgs_filtered.dat'
 
     if not P(filename).stem.endswith('Decon'):
         filename = P(filename).parent.joinpath(

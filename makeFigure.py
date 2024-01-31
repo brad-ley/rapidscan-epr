@@ -96,6 +96,6 @@ def plot(filename, amplitude, frequency, coil, choice='real', Bphase=np.pi, fit=
 
 
 if __name__ == "__main__":
-    FILENAME = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/8/25/Second try (short acq)/demod_M01.dat' 
+    FILENAME = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2022/8/25/Second try (copied)/avg_M01.dat' 
     plot(FILENAME, 150e-3, 70e3, 0.29, choice='real', Bphase=-np.pi, fit=False)
     plt.show()

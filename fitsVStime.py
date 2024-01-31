@@ -119,20 +119,20 @@ def plotfits(filename, ontimes=(0, -1)):
         fits = np.c_[fits, peaks[:, 1]]
         # Raw A has to go last here bc of concatenation
         fitdict = {
-            1: '$\Delta y$',
+            1: r'$\Delta y$',
             2: 'A',
             3: '$x_0$',
-            4: '$\Delta \omega$',
+            4: r'$\Delta \omega$',
             5: 'Peak-to-peak',
             6: 'Raw pk2pkh',
             7: 'Raw A'
         }
     except FileNotFoundError:
         fitdict = {
-            1: '$\Delta y$',
+            1: r'$\Delta y$',
             2: 'A',
             3: '$x_0$',
-            4: '$\Delta \omega$',
+            4: r'$\Delta \omega$',
             5: 'Peak-to-peak',
             6: 'Raw pk2pkh'
         }
@@ -166,7 +166,7 @@ def plotfits(filename, ontimes=(0, -1)):
                 
                 ### LiPC ###
                 ### LiPC ###
-                if fitdict[key] == '$\Delta \omega$':
+                if fitdict[key] == r'$\Delta \omega$':
                 # if fitdict[key] in ['Peak-to-peak']:
                     # select = np.logical_and(
                     #     fits[:, i] > 0, fits[:, i] < 1.1 * np.mean(fits[:, i]))
@@ -306,7 +306,7 @@ def plotfits(filename, ontimes=(0, -1)):
             # except IndexError:
                 pass
             line = ax.scatter(ts, y, label=f'{fitdict[key]}, {popt[-1]:.1f} s')
-            # if fitdict[key] in ['$\Delta \omega$', 'Peak-to-peak']:
+            # if fitdict[key] in [r'$\Delta \omega$', 'Peak-to-peak']:
 
     # except IndexError:
     except ValueError:

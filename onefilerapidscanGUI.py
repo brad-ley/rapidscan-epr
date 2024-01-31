@@ -91,10 +91,10 @@ def plotfit(datajson, fitjson, trange):
         # if True:
 
         if fitjson:
-            d = pd.read_json(fitjson, orient='split')
+            d = pd.read_json(io.StringIO(fitjson), orient='split')
             fig = px.line(d, x='time', y=['raw', 'fit'])
         else:
-            d = pd.read_json(datajson, orient='split')
+            d = pd.read_json(io.StringIO(datajson), orient='split')
             fig = px.line(d, x='time', y=0)
         fig.update_xaxes(range=np.array(trange) * 1e-6)
         fig.update_layout({"uirevision": "foo"}, overwrite=True)
@@ -114,7 +114,7 @@ def save(_, phasedjson, filepath):
     # try:
 
     if True:
-        d = pd.read_json(phasedjson, orient='split')
+        d = pd.read_json(io.StringIO(phasedjson), orient='split')
 
         if len(d.columns) <= 3:
             add = '_onefileDecon'
@@ -194,7 +194,7 @@ def batch(_, coil, amp, freq, bphase, datajson, filepath, addpi_n, sigphase,
             outjson = decon(sendd, coil, amp, freq, bphase, harm, modfield)
             # temp = pd.read_json(outjson, orient='split')
             _, outd, _, _ = phase(0, addpi_n, sigphase, outjson, curphi)
-            temp = pd.read_json(outd, orient='split')
+            temp = pd.read_json(io.StringIO(outd), orient='split')
             decondat[str(d) + ' disp'] = temp['disp']
             decondat[str(d) + ' abs'] = temp['abs']
             # statusBar((i + 1)/ len(cols) * 100)
@@ -230,7 +230,7 @@ def phase(auto_n, addpi_n, sigphase, datajson, curphi):
     phi = curphi % (2 * np.pi)
     try:
         # if True:
-        d = pd.read_json(datajson, orient='split')
+        d = pd.read_json(io.StringIO(datajson), orient='split')
         res = d['abs'] + 1j * d['disp']
 
         if 'findphase' == ctx.triggered_id:
@@ -291,7 +291,7 @@ def fit(_, datajson, coil, amplitude, freq, bphase, trange):
     fitd = pd.DataFrame()
     try:
         # if True:
-        data = pd.read_json(datajson, orient='split')
+        data = pd.read_json(io.StringIO(datajson), orient='split')
         t = data['time'].to_numpy()
         y = data[0].to_numpy()
         y -= np.mean(y)
@@ -350,7 +350,7 @@ def decon(datajson, coil, amplitude, freq, bphase, harm, modfield):
     outd = pd.DataFrame()
     try:
 
-        d = pd.read_json(datajson, orient='split')
+        d = pd.read_json(io.StringIO(datajson), orient='split')
         t = d['time'].to_numpy()
         sig = d[0].to_numpy(dtype='complex128')
 
@@ -374,6 +374,7 @@ def decon(datajson, coil, amplitude, freq, bphase, harm, modfield):
         f = np.fft.fftshift(np.fft.fftfreq(n, t[1] - t[0]))
         B = -f * 2 * np.pi / GAMMA
 
+        # frac = 1 / 3
         frac = 1 / 2
         res = M[np.abs(B) < frac * amplitude * coil] / Phi[np.abs(B) < frac * amplitude * coil]
 
@@ -491,7 +492,9 @@ def parse_contents(filepath):
         h = html.Div(f"Loaded {P(filepath).name}", style={'color': 'green'})
         firstrun['time'] = dat['time']
         # firstrun[0] = dat[dat.columns[int(len(dat.columns)/2)]]
-        firstrun[0] = dat[dat.columns[1]]
+        # print(dat.loc[:, dat.columns != 'time'])
+        # print("========")
+        firstrun[0] = dat.loc[:, dat.columns != 'time'][0]
     # try:
     #     pass
     except (FileExistsError, FileNotFoundError):

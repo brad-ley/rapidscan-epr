@@ -87,6 +87,7 @@ def demod(freq, phase, raw, n_clicks, old_clicks):
         dat = (d['real'] + 1j * d['imag']).to_numpy()
 
         padn = 10
+
         if n_clicks > old_clicks:
             paddat = np.pad(dat, (padn * len(dat), padn * len(dat)),
                             'constant') * np.blackman(2 * padn * len(dat) + len(dat))
@@ -99,15 +100,20 @@ def demod(freq, phase, raw, n_clicks, old_clicks):
         # def sin(x, B, c, phi):
         ls = [1, -1]
         o = []
+
         for i, l in enumerate(ls):
             o.append(np.std(dat * np.exp(l * 1j * 2 * np.pi * freq * 1E6 * t)))  
 
         v = ls[np.argmin(o)] # find whether we need pos or neg freq
             
+        outdat = dict(mag=np.abs(dat) - np.mean(np.abs(dat)))
         dat *= np.exp(v * 1j * 2 * np.pi * freq * 1E6 * t)
         dat *= np.exp(1j * phase * np.pi / 180)
         datad = pd.DataFrame(dict(time=t, demod=dat))
-        outdat = dict(time=t, real=np.real(dat), imag=np.imag(dat), mag=np.abs(dat))
+        ### new ###
+        dat -= np.mean(dat)
+        ### new ###
+        outdat.update(dict(time=t, real=np.real(dat), imag=np.imag(dat)))
 
     except (FileNotFoundError, ValueError):
         print('error')
@@ -186,7 +192,7 @@ def parse_contents(n, filepath, d):
                                 on_bad_lines='skip',
                                 engine='python',)
 
-                d['avg'] = [ast.literal_eval(ii) for ii in list(d['avg'].to_numpy())]
+                d['avg'] = [ast.literal_eval(ii)['real'] + 1j * ast.literal_eval(ii)['imag'] for ii in list(d['avg'].to_numpy())]
                 d['real'] = np.real(d['avg'])
                 d['imag'] = np.imag(d['avg'])
 
@@ -282,9 +288,9 @@ app.layout = html.Div(
                     dcc.Slider(
                         # # 70.02,
                         # 70.04,
-                        69,
+                        67.5,
                         # 65,
-                        71,
+                        72.5,
                         id='dfreq',
                         value=70,
                         marks=None,
