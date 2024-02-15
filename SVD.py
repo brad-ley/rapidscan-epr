@@ -15,6 +15,13 @@ import pyarrow.feather as feather
 
 from matplotlib import rc
 
+def isdigit(a: str):
+    try:
+        float(a)
+        return True
+    except ValueError:
+        return False
+
 if __name__ == "__main__":
     plt.style.use(['science'])
     rc('text.latex', preamble=r'\usepackage{cmbright}')
@@ -28,7 +35,7 @@ if __name__ == "__main__":
                 ]
     plt.rcParams.update(dict(rcParams))
 
-fig, ax = plt.subplots()
+fig, ax = plt.subplots(figsize=(8,6))
 
 def decompose(mat, times, k=2):
     """decompose.
@@ -43,36 +50,50 @@ def decompose(mat, times, k=2):
     
     mT = np.copy(mat)
     mu = mT.mean(axis=1, keepdims=True)
+    mu = 0
     mT -= mu
-    U, E, V = np.linalg.svd(np.transpose(mT))
-    ff, aa = plt.subplots()
-    aa.scatter(U[:, 0], U[:, 1], c='k')
+    # U, E, V = np.linalg.svd(np.transpose(mT))
+    U, E, Vh = np.linalg.svd(mT)
+    ff, aa = plt.subplots(figsize=(8,6))
+    # for idx, v in enumerate(U[:, 0]):
+    aa.scatter(U[:, 0], U[:, 1], c=range(len(U[:, 0])))
+    gg, gga = plt.subplots(figsize=(8,6))
+    for ii in range(k):
+        gga.scatter(range(len(U[:, 0])), U[:, ii], c=range(len(U[:, 0])))
+    # aa.scatter(U[:, 0], U[:, 1], c='k')
 
     # ff.savefig('/Users/Brad/Desktop/princpal_comps_297.5.png', dpi=600)
 
-    v = V[:, :k]
-    PCAmT = v.T @ mT
+    u = U[:, :k]
+    # PCAmT = u @ u.transpose() @ mT + mu
+    PCAmT = u @ np.diag(E[:k]) @ Vh[:k, :] + mu
+    ggg, ggga = plt.subplots(figsize=(8,6))
+    ggga.imshow(PCAmT, aspect='auto')
+    ggga.set_title('Reconstructed')
+    ggga.set_xlabel('Time (s)')
+    ggga.set_ylabel('Field (G)')
+    # ggga.plot(times, PCAmT[PCAmT.shape[0]//2, :])
+    # plt.show()
+    # raise Exception
 
-    tot = np.zeros(np.shape(PCAmT[:, :])[-1])
-
-    ax.axvspan(30, 40, 
-            facecolor='#00A7CA',
-               alpha=0.25,
-               label='Laser on',)
+    # tot = np.zeros(np.shape(PCAmT[:, :])[-1])
 
     for ii in range(k):
-        val = PCAmT[ii, :]
-        ax.plot(times, val, label=f'$C_{ii+1}$')
+        # val = PCAmT[ii, :]
+        val = U[:, ii]
+        # ax.plot(times, val, label=f'$C_{ii+1}$')
+        ax.plot(val, label=f'$C_{ii+1}$')
         # ax.plot(val / val[np.argmax(np.abs(val))], label=f'$C_{ii+1}$')
         # ax.plot(times, val, label=f'$C_{ii+1}$')
         # ax.plot(times, val / np.max(val), label=f'$C_{ii+1}$')
-        tot += val
+
+        # tot += val
     ax.legend()
     
     # ax.plot(tot+1)
-    # fu, au = plt.subplots()
+    # fu, au = plt.subplots(figsize=(8,6))
     # au.imshow(V[:, :2] @ V[:, :2].T @ mT + mu, aspect='auto')
-    # fh, ah = plt.subplots()
+    # fh, ah = plt.subplots(figsize=(8,6))
     # o = 1
     # ah.plot((V[:, :o] @ V[:, :o].T @ mT + mu)[:, 0], label='0 ' + str(o))
     # ah.plot((V[:, :o] @ V[:, :o].T @ mT + mu)[:, 100], label='100 ' + str(o))
@@ -85,13 +106,13 @@ def decompose(mat, times, k=2):
     # ah.plot((V[:, :o] @ V[:, :o].T @ mT + mu)[:, 300], label='300 ' + str(o))
     # ah.legend()
 
-    return PCAmT, V, E
+    return PCAmT, Vh, E
 
 
 def main(filename):
     mat = feather.read_feather(filename)
     cols = [ii for ii in mat.columns if 'abs' in ii]
-    plotfield = 25
+    plotfield = 30
     # plotcenter = -15
     B = mat['B'].to_numpy()
     first = mat[cols[0]].to_numpy()[np.abs(B) < plotfield]
@@ -129,7 +150,7 @@ def main(filename):
                 # dat[:, ind] = coldat.to_numpy()[len(coldat)//2 - (h-l)//4: len(coldat)//2 + (h-l)//4 + 1]
     ### CENTERING ### 
 
-    f, a = plt.subplots()
+    f, a = plt.subplots(figsize=(8,6))
     a.imshow(dat, aspect='auto', interpolation='none')
     a.set_xlabel('Time (s)')
     a.set_ylabel('Field (G)')
@@ -141,26 +162,40 @@ def main(filename):
 
     k = 2
     PCA, V, E = decompose(dat, times, k=k)
-    fh, ah = plt.subplots()
-    fg, ag = plt.subplots()
+    fh, ah = plt.subplots(figsize=(8,6))
+    fg, ag = plt.subplots(figsize=(8,6))
     ratioE = [E[i] / E[i + 1] if i < len(E) - 1 else 0 for i, _ in enumerate(E)]
     ratioE = ratioE[:-2]
     # ag.scatter(range(1, len(E)), E[:-1])
     ag.scatter(range(len(ratioE)), ratioE)
     ag.set_yscale('log')
-    agi = ag.inset_axes([0.25, 0.6, 0.6, 0.3], transform=ag.transAxes)
+    agi = ag.inset_axes([0.25, 0.6, 0.45, 0.3], transform=ag.transAxes)
     agi.set_yscale('log')
-    agi.scatter(range(len(ratioE[:6])), ratioE[:6])
+    agi.scatter(range(1, 6), ratioE[1:6])
     ag.indicate_inset_zoom(agi, edgecolor='black')
-    ag.set_ylabel(r'Log$(\frac{\lambda_i}{\lambda_{i+1}})$')
+    ag.set_ylabel(r'$(\frac{\lambda_i}{\lambda_{i+1}})$')
     ag.set_xlabel('Index $n$')
 
     for i in range(k):
-        ah.plot(B, V[:, i] + 0.1 * i, label=f'$C_{i+1}$')
-        popt, pcov = curve_fit(lorentzian, B, V[:, i])
-        print(popt)
-        ah.plot(B, lorentzian(B, *popt) + 0.1 * i, label='fit')
-    ah.set_xlabel('Field (G)')
+        ah.plot(times, V[i, :] + 0.3 * i, label=f'$C_{i+1}$')
+        # popt, pcov = curve_fit(lorentzian, B, V[:, i])
+        # print(popt)
+        # ah.plot(B, lorentzian(B, *popt) + 0.1 * i, label='fit')
+
+    pre = 30
+    on = pre + 10
+    if '_pre' in P(filename).stem:
+        pre = "".join([ii for ii in P(filename).stem.split("_") if 'pre' in ii and 's' in ii])
+        pre = float("".join([ii for ii in list(pre) if isdigit(ii)]))
+    if '_on' in P(filename).stem:
+        on = "".join([ii for ii in P(filename).stem.split("_") if 'on' in ii and 's' in ii])
+        on = float("".join([ii for ii in list(on) if isdigit(ii)]))
+    ah.axvspan(pre, pre + on, 
+            facecolor='#00A7CA',
+               alpha=0.25,
+               label='Laser on',)
+    # ah.set_xlabel('Field (G)')
+    ah.set_xlabel('Time (s)')
     ah.set_ylabel('Amplitude')
     ah.legend(
             markerfirst=False,
@@ -181,6 +216,6 @@ def main(filename):
 
 
 if __name__ == "__main__":
-    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/30/FMN sample/stable/279.6 sqrt copy/M01_279.6K_unstable_pre30s_on10s_off470s_25000avgs_filtered_batchDecon.feather'
+    filename = '/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2024/1/31/406-537 WT/282.93 K 2/105.5mA_23.5kHz_pre30s_on5s_off235s_25000avgs_filtered_batchDecon.feather'
     main(filename)
     plt.show()
