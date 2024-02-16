@@ -178,9 +178,9 @@ class DataSet:
                     for idx, _ in enumerate(E)
                 ]
             )
-            k = np.where(ratios < 2)[0][0]  # find first time it goes below 2
-        if k == 1:
-            k = 2  # have at least 2 eigenvalues so the plotting indices don't error out
+            k = np.where(ratios < 1.5)[0][0]  # find first time it goes below 2
+        # if k == 1:
+        #     k = 2  # have at least 2 eigenvalues so the plotting indices don't error out
         self.k = k
 
         self.U = U[:, :k]
@@ -194,19 +194,24 @@ class DataSet:
 
         :param subbasis: if True, show imshow image of the data recreated with k principal components
         """
-        self.imshow_f, self.a = plt.subplots(figsize=(8, 6))
-        dat = self.dat
-
         if subbasis:
             self.subbasis = True
             dat = self.subbasis_data
-            self.a.set_title(f"PCA ($k = {self.k}$) sub-basis recreated data")
+            self.imshow_sim, self.a_sim = plt.subplots(figsize=(8, 6))
+            a = self.a_sim
+            self.a_sim.set_title(
+                f"PCA ($k = {self.k}$) sub-basis recreated data"
+            )
+        else:
+            dat = self.dat
+            self.imshow_raw, self.a_raw = plt.subplots(figsize=(8, 6))
+            a = self.a_raw
 
         if hasattr(self, "mean_centered"):
             dat += self.mu[:, np.newaxis]  # type: ignore
-        self.a.imshow(dat, aspect="auto")
-        self.a.set_xlabel("Time (s)")
-        self.a.set_ylabel("Intensity (arb. u)")
+        a.imshow(dat, aspect="auto")
+        a.set_xlabel("Time (s)")
+        a.set_ylabel("Intensity (arb. u)")
 
         return self
 
@@ -221,10 +226,10 @@ class DataSet:
 
     def plotLSVs(self):
         self.lsvf, self.lsva = plt.subplots(
-            nrows=self.Vh.shape[0], figsize=(8, 6)
+            nrows=self.Vh.shape[0], figsize=(8, 6), squeeze=False, sharex=True
         )
         for idx, u in enumerate(self.U[0, :]):
-            (line,) = self.lsva[idx].plot(
+            (line,) = self.lsva[idx, 0].plot(
                 self.B, self.U[:, idx], label=f"$C_{{{idx + 1}}}$", alpha=0.5
             )
             find = 2
@@ -233,7 +238,7 @@ class DataSet:
             try:
                 if idx + 1 == find - 1:
                     popt, pcov = curve_fit(lorentzian, self.B, self.U[:, idx])
-                    self.lsva[idx].plot(
+                    self.lsva[idx, 0].plot(
                         self.B,
                         lorentzian(self.B, *popt),
                         c=line.get_color(),
@@ -263,20 +268,18 @@ class DataSet:
                         b1=dict(
                             value=0.1,
                             vary=True,
-                            min=0.1,
-                            max=np.max(self.E),
+                            # min=0.1,
+                            # max=np.max(self.E),
                         ),
                         b2=dict(
                             value=-0.1,
                             vary=True,
-                            min=-np.max(self.E),
-                            max=-0.1,
+                            # min=-np.max(self.E),
+                            # max=-0.1,
                         ),
-                        w1=dict(
-                            value=10, vary=True, min=3, max=np.max(self.B)
-                        ),
+                        w1=dict(value=5, vary=True, min=3, max=np.max(self.B)),
                         w2=dict(
-                            value=30, vary=True, min=3, max=np.max(self.B)
+                            value=12, vary=True, min=3, max=np.max(self.B)
                         ),
                     )
 
@@ -285,27 +288,7 @@ class DataSet:
                         params,
                         fcn_args=(self.U[:, idx], self.B),
                     )
-                    self.res = obj.minimize(method="basinhopping")
-                    # popt, pcov = curve_fit(
-                    #     double_lorentzian,
-                    #     self.B,
-                    #     self.U[:, idx],
-                    #     p0=[
-                    #         0,
-                    #         np.max(self.U[:, idx]),
-                    #         -np.max(self.U[:, idx]),
-                    #         5,
-                    #         40,
-                    #     ],
-                    #     # maxfev=10000,
-                    # )
-                    # self.lsva[idx].plot(
-                    #     self.B,
-                    #     double_lorentzian(self.B, *popt),
-                    #     c=line.get_color(),
-                    #     ls="--",
-                    #     label=rf"$\omega_1={popt[-4]:.1f}\,$G, $\omega_2={popt[-1]:.1f}\,$G",
-                    # )
+                    self.res = obj.minimize(method="ampgo")
                     parvals = self.res.params.valuesdict()  # type: ignore
 
                     x0 = parvals["x0"]
@@ -316,21 +299,21 @@ class DataSet:
                     w1 = parvals["w1"]
                     w2 = parvals["w2"]
 
-                    self.lsva[idx].plot(
+                    self.lsva[idx, 0].plot(
                         self.B,
                         double_lorentzian(self.res.params, self.B),  # type: ignore
                         c=line.get_color(),
                         ls="--",
                         label=r"$F_{\omega_1} + F_{\omega_2}$",
                     )
-                    self.lsva[idx].plot(
+                    self.lsva[idx, 0].plot(
                         self.B,
                         lorentzian(self.B, x0, a1, b1, w1),
                         # c=line.get_color(),
                         ls="--",
                         label=rf"$\omega_1={w1:.1f}\,$G",
                     )
-                    self.lsva[idx].plot(
+                    self.lsva[idx, 0].plot(
                         self.B,
                         lorentzian(self.B, x0, a2, b2, w2),
                         # c=line.get_color(),
@@ -340,7 +323,7 @@ class DataSet:
 
             except RuntimeError:
                 print(f"Could not fit w_{idx+1} component")
-            self.lsva[idx].legend(
+            self.lsva[idx, 0].legend(
                 loc="upper right",
                 handlelength=0.75,
                 labelspacing=0.25,
@@ -351,13 +334,13 @@ class DataSet:
 
     def plotRSVs(self):
         self.rsvf, self.rsva = plt.subplots(
-            nrows=self.Vh.shape[0], figsize=(8, 6)
+            nrows=self.Vh.shape[0], figsize=(8, 6), squeeze=False, sharex=True
         )
         find = 2
         if hasattr(self, "mean_centered"):
             find = 1
         for idx, v in enumerate(self.Vh[:, 0]):
-            (line,) = self.rsva[idx].plot(
+            (line,) = self.rsva[idx, 0].plot(
                 self.times,
                 self.E[idx] * self.Vh[idx, :] + 0.0 * idx,
                 label=f"$w_{{{idx + 1}}}(t)$",
@@ -377,7 +360,11 @@ class DataSet:
                     ],
                 )
                 err = 2 * np.sqrt(np.diag(pcov))
-                self.rsva[idx].plot(
+                if err[-1] == np.inf:
+                    error_bar = "error"
+                else:
+                    error_bar = f"{err[-1]:.1f}"
+                self.rsva[idx, 0].plot(
                     self.times[self.times > self.pre + self.on],
                     exp(
                         self.times[self.times > self.pre + self.on]
@@ -385,7 +372,7 @@ class DataSet:
                         *popt,
                     )
                     + 0.0 * idx,
-                    label=rf"$\tau={popt[-1]:.1f}\pm{err[-1]:.1f}\,$s",
+                    label=rf"$\tau={popt[-1]:.1f}\pm${error_bar}$\,$s",
                     c=line.get_color(),
                     ls="--",
                 )
@@ -395,7 +382,7 @@ class DataSet:
             except RuntimeError:
                 print(f"Could not fit w_{idx+1} component")
             try:
-                self.rsva[idx].axvspan(
+                self.rsva[idx, 0].axvspan(
                     self.pre,
                     self.pre + self.on,
                     facecolor="#00A7CA",
@@ -404,10 +391,7 @@ class DataSet:
                 )
             except ValueError:
                 pass
-            self.rsva[idx].legend()
-            # self.rsva[idx].set_ylim(
-            # 1.05 * np.array([np.min(self.Vh), np.max(self.Vh)])
-            # )
+            self.rsva[idx, 0].legend()
         self.rsvf.supxlabel("Time (s)")
         self.rsvf.supylabel(r"Intensity (weighted by $\Sigma_i$)")
         return self
@@ -417,17 +401,25 @@ class DataSet:
         if not path.exists():
             path.mkdir()
         if hasattr(self, "sim_as_data"):
-            add = "sim_"
+            add = f"sim-{self.sim_components}components_"
         else:
             add = ""
         if hasattr(self, "rsvf"):
             self.rsvf.savefig(path.joinpath(f"{add}SVDweights.png"), dpi=1200)
         if hasattr(self, "lsvf"):
             self.lsvf.savefig(path.joinpath(f"{add}SVDvectors.png"), dpi=1200)
-        if hasattr(self, "imshow_f"):
+        if hasattr(self, "imshow_sim"):
             if hasattr(self, "subbasis"):
                 add += "subbasis_"
-            self.imshow_f.savefig(path.joinpath(f"{add}imshow.png"), dpi=1200)
+            self.imshow_sim.savefig(
+                path.joinpath(f"{add}imshow_sim.png"), dpi=1200
+            )
+        if hasattr(self, "imshow_raw"):
+            if hasattr(self, "subbasis"):
+                add += "subbasis_"
+            self.imshow_raw.savefig(
+                path.joinpath(f"{add}imshow_raw.png"), dpi=1200
+            )
 
         if hasattr(self, "res") or hasattr(self, "popt"):
             dt1 = pd.DataFrame(columns=["name", "value", "stderr"])  # type: ignore
@@ -447,53 +439,109 @@ class DataSet:
 
     def simulate(
         self,
-        linewidths: List[Tuple[float, float]] = [(9, -1.5)],
-        ratios: List[float] = [1],
+        linewidths: List[float] = [9],
+        ratio_to_first: List[Tuple[float, float]] = [(1, -1)],
+        naive: bool = False,
+        tau: List[float] | float = 150,
     ):
         """simulate.
 
-        :param linewidths: [(start_1, delta_1), ..., (start_n, delta_n)] input tuple for each Lorenztian that you want to appear in the time-dependent lineshape simulation
-        start is initial linewidth, delta is the change when activated
-        :type linewidths: List[Tuple[float, float, float]]
-        :param ratios: [ratio_1_to_1,... , ratio_n_to_1]
-        :type ratios: List[float]
+        :param linewidths: [linewidth_1, linewidth_n] input width for each Lorenztian that you want to appear in the time-dependent lineshape simulation
+        :type linewidths: List[Tuple[float, float]]
+        :param ratio_to_first: [(ratio11_start, ratio11_delta),... , (ration1_start, ration1_delta)]
+        if naive is True, ratio_to_first[0][1] is the amount the linewidth will change in linewidth units and ratio_to_first[0][0] is unbound
+        :type ratio_to_first: List[Tuple[float, float]]
+        :param naive: runs the simulation with only linewidth that is changing in time, not multiple populations
+        :type naive: bool
+        :param tau: relaxation decay constants for each component, input can be list with a tau for each component or single float used for all of them
+        :type naive: List[float]|float
         """
-
-        lw_matrix = np.zeros((len(linewidths), self.times.shape[0]))
-        add = np.zeros(self.times.shape[0])
-        for idx, (linewidth, delta) in enumerate(linewidths):
-            add[self.times > self.pre + self.on] = exp(
-                self.times[self.times > self.pre + self.on]
-                - (self.pre + self.on),
-                0,
-                delta,
-                150,
-            )  # 150s decay from 8 G to 10 G
-            lw_matrix[idx, :] += linewidth * np.ones(self.times.shape[0]) + add
-
-        self.simulated = np.zeros(self.dat.shape)
-        for idx, t in enumerate(self.times):
-            for idx2, _ in enumerate(lw_matrix[:, idx]):
-                self.simulated[:, idx] += ratios[idx2] * lorentzian(
-                    self.B, 0, 0, 1, lw_matrix[idx2, idx]
+        if ratio_to_first[0][0] != 1:
+            raise Exception("ratio_to_first of first must be 1")
+        if len(ratio_to_first) != len(linewidths):
+            raise Exception(
+                "Linewidth and ratio_to_first list lengths do not match"
+            )
+        if type(tau) is list:
+            taus = np.copy(tau)
+            if len(tau) != len(linewidths):
+                raise Exception(
+                    "Tau and ratio_to_first list lengths do not match"
                 )
+        else:
+            taus = [tau] * len(linewidths)
+        if naive and len(linewidths) > 1:
+            raise Exception(
+                "Naive takes only one linewidth and delta as input"
+            )
+
+        if naive:
+            linewidth = linewidths + np.concatenate(
+                (
+                    np.zeros(np.where(self.times > (self.pre))[0][0]),
+                    exp(
+                        self.times[self.times > (self.pre)] - (self.pre),
+                        0,
+                        ratio_to_first[0][1],
+                        taus[0],
+                    ),
+                )
+            )
+            self.simulated = np.zeros((self.B.shape[0], self.times.shape[0]))
+            for idx, lw in enumerate(linewidth):
+                self.simulated[:, idx] = lorentzian(self.B, 0, 0, 1, lw)
+
+        else:
+            lw_matrix = np.zeros((self.B.shape[0], len(linewidths)))
+
+            for idx, linewidth in enumerate(linewidths):
+                lw_matrix[:, idx] = lorentzian(self.B, 0, 0, 1, linewidth)
+
+            t_matrix = np.zeros((len(ratio_to_first), self.times.shape[0]))
+            for idx, (ratio, ratio_delta) in enumerate(ratio_to_first):
+                # print(exp(self.times[self.times > self.pre] - self.pre, 0, 1, 100))
+                t_matrix[idx, :] = ratio + np.concatenate(
+                    (
+                        np.zeros(np.where(self.times > (self.pre))[0][0]),
+                        exp(
+                            self.times[self.times > (self.pre)] - (self.pre),
+                            0,
+                            ratio_delta,
+                            taus[idx],
+                        ),
+                    )
+                )
+
+                if idx:  # make sure that it isn't the first component, then subtract the weight of the 2-nth component
+                    t_matrix[0, :] -= t_matrix[idx, :]
+
+            self.simulated = lw_matrix @ t_matrix
+        self.sim_components = len(linewidths)
+        return self
 
     def use_simulate_as_data(self, **kwargs):
         if not hasattr(self, "simulated"):
             self.simulate(**kwargs)
         self.sim_as_data = True
         self.dat = self.simulated
+        return self
 
 
 def main(filename):
-    DS = DataSet(filename)
-    DS.center()
-    DS.use_simulate_as_data(linewidths=[(10, -5, 5), (10, 10, 5)])
-    # DS.wrap(wrap_time=1064)
+    DS = DataSet(filename).center()
+    DS.simulate(
+        linewidths=[5, 12],
+        ratio_to_first=[(1, 0), (0.95, -0.20)],
+        # linewidths=[9],
+        # ratio_to_first=[(1, -1)],
+        # naive=True,
+    )
+    # DS.use_simulate_as_data()
+    DS.wrap(wrap_time=1064)
     DS.mean_center()
     DS.svd(k=2)
     DS.plotSVs()
-    DS.plotMatrix(subbasis=True)
+    DS.plotMatrix()
     DS.saveResults()
     DS.show()
 
