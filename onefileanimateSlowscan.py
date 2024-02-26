@@ -70,9 +70,12 @@ def process(
     ti = ts[np.argmin(np.abs(ts - ontimes[0]))]
     tf = ts[np.argmin(np.abs(ts - ontimes[1]))]
 
-    ### for wrapping ###
-    idx = np.where(ts > 1066)[0][0]
-    cols = np.roll(np.array(cols), len(cols) - idx)
+    # for wrapping #
+    try:
+        idx = np.where(ts > 1066)[0][0]
+        cols = np.roll(np.array(cols), len(cols) - idx)
+    except IndexError:
+        pass
 
     cmap = plt.get_cmap("cool")
     norm = mpl.colors.Normalize(vmin=0, vmax=len(cols) * tstep)

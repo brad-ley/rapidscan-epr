@@ -102,10 +102,10 @@ def demod(freq, phase, raw, n_clicks, old_clicks):
         o = []
 
         for i, l in enumerate(ls):
-            o.append(np.std(dat * np.exp(l * 1j * 2 * np.pi * freq * 1E6 * t)))  
+            o.append(np.std(dat * np.exp(l * 1j * 2 * np.pi * freq * 1E6 * t)))
 
         v = ls[np.argmin(o)] # find whether we need pos or neg freq
-            
+
         outdat = dict(mag=np.abs(dat) - np.mean(np.abs(dat)))
         dat *= np.exp(v * 1j * 2 * np.pi * freq * 1E6 * t)
         dat *= np.exp(1j * phase * np.pi / 180)
@@ -168,7 +168,7 @@ def parse_contents(n, filepath, d):
                                 len(d[d.columns[0]]) * dt,
                                 len(d[d.columns[0]]))
                 d[d.columns[0]] = x
-                # d['avg'] = 
+                # d['avg'] =
                 d = d.rename(columns={"Y[0]":"real", "Y[1]":"imag", "Y[2]":"sin"})
 
             except KeyError:
@@ -238,9 +238,9 @@ def save(_, demod, filepath):
         demod.to_csv(
         # print(
             P(filepath).parent.joinpath(
-                "demod_" + P(filepath).stem.lstrip("avg_") + 
+                "demod_" + P(filepath).stem.lstrip("avg_") +
                 P(filepath).suffix)
-        ) 
+        )
     except ValueError:
         pass
 

@@ -1,4 +1,5 @@
 import ast
+import sys
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -51,7 +52,17 @@ def fit_fun(params, data, B):
     """
     Fit handler to return the RMSE deviation from ideal double_lorentzian
     """
-    return (data - double_lorentzian(params, B)) ** 2
+    return (data - double_lorentzian(params, B)) ** 2 * lorentzian_sum(
+        params, B
+    ) ** 2
+
+
+def lorentzian_sum(params, x):
+    """
+    Need to normalize both to make sure the total number of spins going from
+    one to the other is conserved
+    """
+    return 1
 
 
 def double_lorentzian(params, x):
@@ -65,9 +76,10 @@ def double_lorentzian(params, x):
     a2 = parvals["a2"]
     b1 = parvals["b1"]
     b2 = parvals["b2"]
+    # b2 = b1
     w1 = parvals["w1"]
     w2 = parvals["w2"]
-    return lorentzian(x, x0, a1, b1, w1) + lorentzian(x, x0, a2, b2, w2)
+    return lorentzian(x, x0, a1, b1, w1) - lorentzian(x, x0, a2, b2, w2)
 
 
 def exp(x, a, b, t):
@@ -123,6 +135,9 @@ class DataSet:
     def center(self):
         self.dat = np.zeros(((self.high - self.low), len(self.cols)))
 
+        nearcenter = (
+            self.low + (self.high - self.low) // 2
+        )  # should be near middle of field
         for ind, col in enumerate(self.cols):
             # center = np.argmax(mat[col][l:h].to_numpy()) + l
             tdat = self.mat[col][self.low : self.high].to_numpy()
@@ -139,18 +154,21 @@ class DataSet:
                 ]
             )
             center = np.argmax(rolling) + self.low
-            coldat = self.mat[col].to_numpy()
-            try:
-                self.dat[:, ind] = coldat[
-                    center - int((self.high - self.low) / 2) : center
-                    + int((self.high - self.low) / 2)
-                ]
-            except ValueError:
-                self.dat[:, ind] = coldat[
-                    center - int((self.high - self.low) / 2) : center
-                    + int((self.high - self.low) / 2)
-                    + 1
-                ]
+            if (
+                np.abs(nearcenter - center) / nearcenter < 0.2
+            ):  # if there is a big variation don't bother
+                coldat = self.mat[col].to_numpy()
+                try:
+                    self.dat[:, ind] = coldat[
+                        center - int((self.high - self.low) / 2) : center
+                        + int((self.high - self.low) / 2)
+                    ]
+                except ValueError:
+                    self.dat[:, ind] = coldat[
+                        center - int((self.high - self.low) / 2) : center
+                        + int((self.high - self.low) / 2)
+                        + 1
+                    ]
 
         return self
 
@@ -179,8 +197,7 @@ class DataSet:
                 ]
             )
             k = np.where(ratios < 1.5)[0][0]  # find first time it goes below 2
-        # if k == 1:
-        #     k = 2  # have at least 2 eigenvalues so the plotting indices don't error out
+
         self.k = k
 
         self.U = U[:, :k]
@@ -208,7 +225,8 @@ class DataSet:
             a = self.a_raw
 
         if hasattr(self, "mean_centered"):
-            dat += self.mu[:, np.newaxis]  # type: ignore
+            # dat += self.mu[:, np.newaxis]  # type: ignore
+            dat += 0
         a.imshow(dat, aspect="auto")
         a.set_xlabel("Time (s)")
         a.set_ylabel("Intensity (arb. u)")
@@ -246,12 +264,17 @@ class DataSet:
                         label=rf"$\omega={popt[-1]:.1f}\,$G",
                     )
                 if idx + 1 == find:
+                    print(
+                        "Data integrals: (raw, absolute value)",
+                        np.trapz(self.U[:, idx]),
+                        np.trapz(np.abs(self.U[:, idx])),
+                    )
                     params = lmfit.create_params(
                         x0=dict(
                             value=0.0,
-                            vary=False,
-                            min=-np.max(self.B),
-                            max=np.max(self.B),
+                            vary=True,
+                            min=-np.max(self.B) / 4,
+                            max=np.max(self.B) / 4,
                         ),
                         a1=dict(
                             value=0,
@@ -261,25 +284,28 @@ class DataSet:
                         ),
                         a2=dict(
                             value=0,
-                            vary=True,
+                            vary=not hasattr(self, "mean_centered"),
                             min=-np.max(self.U[:, idx]),
                             max=np.max(self.U[:, idx]),
                         ),
                         b1=dict(
-                            value=0.1,
+                            value=0.0,
                             vary=True,
                             # min=0.1,
                             # max=np.max(self.E),
                         ),
                         b2=dict(
-                            value=-0.1,
-                            vary=True,
+                            # value=-0.1,
+                            value=0.0,
+                            vary=not hasattr(self, "mean_centered"),
                             # min=-np.max(self.E),
                             # max=-0.1,
                         ),
                         w1=dict(value=5, vary=True, min=3, max=np.max(self.B)),
                         w2=dict(
-                            value=12, vary=True, min=3, max=np.max(self.B)
+                            value=12,
+                            vary=not hasattr(self, "mean_centered"),
+                            min=3,  # max=np.max(self.B)
                         ),
                     )
 
@@ -288,7 +314,7 @@ class DataSet:
                         params,
                         fcn_args=(self.U[:, idx], self.B),
                     )
-                    self.res = obj.minimize(method="ampgo")
+                    self.res = obj.minimize(method="leastsquares")
                     parvals = self.res.params.valuesdict()  # type: ignore
 
                     x0 = parvals["x0"]
@@ -296,8 +322,22 @@ class DataSet:
                     a2 = parvals["a2"]
                     b1 = parvals["b1"]
                     b2 = parvals["b2"]
+                    # b2 = b1
                     w1 = parvals["w1"]
                     w2 = parvals["w2"]
+                    print(
+                        "Fit vars",
+                        a1,
+                        b1,
+                        w1,
+                        "\n",
+                        a2,
+                        b2,
+                        w2,
+                        "\n",
+                        "Fit integral",
+                        np.trapz(double_lorentzian(self.res.params, self.B)),  # type: ignore
+                    )
 
                     self.lsva[idx, 0].plot(
                         self.B,
@@ -315,21 +355,21 @@ class DataSet:
                     )
                     self.lsva[idx, 0].plot(
                         self.B,
-                        lorentzian(self.B, x0, a2, b2, w2),
+                        -1 * lorentzian(self.B, x0, a2, b2, w2),
                         # c=line.get_color(),
                         ls="--",
                         label=rf"$\omega_2={w2:.1f}\,$G",
                     )
 
             except RuntimeError:
-                print(f"Could not fit w_{idx+1} component")
+                print(f"Could not fit w_{idx + 1} component")
             self.lsva[idx, 0].legend(
                 loc="upper right",
                 handlelength=0.75,
                 labelspacing=0.25,
             )
         self.lsvf.supxlabel("Field (G)")
-        self.lsvf.supylabel("Intensity")
+        self.lsvf.supylabel("Intensity (arb. u)")
         return self
 
     def plotRSVs(self):
@@ -380,7 +420,7 @@ class DataSet:
                     self.popt = popt
                     self.err = err
             except RuntimeError:
-                print(f"Could not fit w_{idx+1} component")
+                print(f"Could not fit w_{idx + 1} component")
             try:
                 self.rsva[idx, 0].axvspan(
                     self.pre,
@@ -400,10 +440,12 @@ class DataSet:
         path = P(self.filename).parent.joinpath("SVD/")
         if not path.exists():
             path.mkdir()
+
+        add = ""
         if hasattr(self, "sim_as_data"):
-            add = f"sim-{self.sim_components}components_"
-        else:
-            add = ""
+            add += f"sim-{self.sim_components}components_"
+        if hasattr(self, "mean_centered"):
+            add += "mean-centered_"
         if hasattr(self, "rsvf"):
             self.rsvf.savefig(path.joinpath(f"{add}SVDweights.png"), dpi=1200)
         if hasattr(self, "lsvf"):
@@ -499,7 +541,6 @@ class DataSet:
 
             t_matrix = np.zeros((len(ratio_to_first), self.times.shape[0]))
             for idx, (ratio, ratio_delta) in enumerate(ratio_to_first):
-                # print(exp(self.times[self.times > self.pre] - self.pre, 0, 1, 100))
                 t_matrix[idx, :] = ratio + np.concatenate(
                     (
                         np.zeros(np.where(self.times > (self.pre))[0][0]),
@@ -526,49 +567,90 @@ class DataSet:
         self.dat = self.simulated
         return self
 
+    def normalize(self):
+        def fwhm(x, y):
+            low = np.where(y > 0.5 * np.max(y))[0][0]
+            high = np.where(y > 0.5 * np.max(y))[0][-1]
+            return x[high] - x[low]
+
+        for col in range(self.dat.shape[1]):
+            popt, pcov = curve_fit(lorentzian, self.B, self.dat[:, col])
+            self.dat[:, col] -= popt[1]
+            self.dat[:, col] *= (
+                2 / (np.pi * popt[-1]) / np.trapz(lorentzian(self.B, *popt))
+            )  # normalize to get peak to 2 / pi * FWHM
+            # self.dat[:, col] /= np.max(
+            #     lorentzian(
+            #         self.B, popt[0], 0, *popt[2:]
+            #     )  # force the offset to zero
+            # )
+
+        return self
+
+    def zero_pad(self, n=1):
+        self.dat = np.pad(
+            self.dat,
+            pad_width=((self.dat.shape[0] * n, self.dat.shape[0] * n), (0, 0)),
+            mode="constant",
+            constant_values=0,
+        )
+        self.B = np.linspace(
+            -(n + 1) * np.min(self.B),
+            (n + 1) * np.max(self.B),
+            self.dat.shape[0],
+        )
+        return self
+
 
 def main(filename):
     DS = DataSet(filename).center()
+    DS.normalize()
     DS.simulate(
-        linewidths=[5, 12],
-        ratio_to_first=[(1, 0), (0.95, -0.20)],
-        # linewidths=[9],
-        # ratio_to_first=[(1, -1)],
+        linewidths=[5, 16],
+        ratio_to_first=[(1, 0), (0.95, -0.40)],
+        # linewidths=[10],
+        # ratio_to_first=[(1, -2)],
         # naive=True,
     )
     # DS.use_simulate_as_data()
     DS.wrap(wrap_time=1064)
     DS.mean_center()
-    DS.svd(k=2)
+    DS.svd()
     DS.plotSVs()
     DS.plotMatrix()
     DS.saveResults()
-    DS.show()
+    # DS.show()
 
 
 if __name__ == "__main__":
-    folder = "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2024/1/31/406-537-414"
-    # ================================ #
-    testing = True  # change to True to only run on the file in the next line
-    filename = "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2024/1/31/406-537 WT/282.93 K 2/105.5mA_23.5kHz_pre30s_on5s_off235s_25000avgs_filtered_batchDecon.feather"
     warnings.filterwarnings("ignore", category=FutureWarning)
-    fnames = []
-    for fold in [fold for fold in P(folder).iterdir() if fold.is_dir()]:
-        if any(
-            [file for file in P(fold).iterdir() if file.suffix == ".feather"]
-        ):
-            fnames.append(
-                *[
+    try:
+        folder = sys.argv[1]
+    except IndexError:
+        folder = "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2024/2/26/T406C"
+    if P(folder).is_dir():
+        fnames = []
+        for fold in [fold for fold in P(folder).iterdir() if fold.is_dir()]:
+            if any(
+                [
                     file
                     for file in P(fold).iterdir()
                     if file.suffix == ".feather"
                 ]
-            )
-    if testing:
-        fnames = [filename]
+            ):
+                fnames.append(
+                    *[
+                        file
+                        for file in P(fold).iterdir()
+                        if file.suffix == ".feather"
+                    ]
+                )
+    else:
+        fnames = [folder]
     for fname in tqdm(fnames):
         try:
             main(fname)
         # except ValueError:
         except RuntimeError:
             print(f"ERROR with file: {fname}")
+        plt.close()
