@@ -376,7 +376,7 @@ if __name__ == "__main__":
             P(filename).stem + "_batchDecon.feather"
         )
         # P(filename).stem + '_batchDecon.dat')
-    plotfields = 0 + np.array([-20, 20])
+    plotfields = 0 + 30 * np.array([-1, 1])
     try:
         on = float(
             "".join(

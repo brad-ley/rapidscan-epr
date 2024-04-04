@@ -198,6 +198,8 @@ class DataSet:
             )
             k = np.where(ratios < 1.5)[0][0]  # find first time it goes below 2
 
+        if k == 0:
+            k = 1
         self.k = k
 
         self.U = U[:, :k]
@@ -264,11 +266,11 @@ class DataSet:
                         label=rf"$\omega={popt[-1]:.1f}\,$G",
                     )
                 if idx + 1 == find:
-                    print(
-                        "Data integrals: (raw, absolute value)",
-                        np.trapz(self.U[:, idx]),
-                        np.trapz(np.abs(self.U[:, idx])),
-                    )
+                    # print(
+                    #     "Data integrals: (raw, absolute value)",
+                    #     np.trapz(self.U[:, idx]),
+                    #     np.trapz(np.abs(self.U[:, idx])),
+                    # )
                     params = lmfit.create_params(
                         x0=dict(
                             value=0.0,
@@ -325,19 +327,19 @@ class DataSet:
                     # b2 = b1
                     w1 = parvals["w1"]
                     w2 = parvals["w2"]
-                    print(
-                        "Fit vars",
-                        a1,
-                        b1,
-                        w1,
-                        "\n",
-                        a2,
-                        b2,
-                        w2,
-                        "\n",
-                        "Fit integral",
-                        np.trapz(double_lorentzian(self.res.params, self.B)),  # type: ignore
-                    )
+                    # print(
+                    #     "Fit vars",
+                    #     a1,
+                    #     b1,
+                    #     w1,
+                    #     "\n",
+                    #     a2,
+                    #     b2,
+                    #     w2,
+                    #     "\n",
+                    #     "Fit integral",
+                    #     np.trapz(double_lorentzian(self.res.params, self.B)),  # type: ignore
+                    # )
 
                     self.lsva[idx, 0].plot(
                         self.B,
@@ -346,20 +348,20 @@ class DataSet:
                         ls="--",
                         label=r"$F_{\omega_1} + F_{\omega_2}$",
                     )
-                    self.lsva[idx, 0].plot(
-                        self.B,
-                        lorentzian(self.B, x0, a1, b1, w1),
-                        # c=line.get_color(),
-                        ls="--",
-                        label=rf"$\omega_1={w1:.1f}\,$G",
-                    )
-                    self.lsva[idx, 0].plot(
-                        self.B,
-                        -1 * lorentzian(self.B, x0, a2, b2, w2),
-                        # c=line.get_color(),
-                        ls="--",
-                        label=rf"$\omega_2={w2:.1f}\,$G",
-                    )
+                    # self.lsva[idx, 0].plot(
+                    #     self.B,
+                    #     lorentzian(self.B, x0, a1, b1, w1),
+                    #     # c=line.get_color(),
+                    #     ls="--",
+                    #     label=rf"$\omega_1={w1:.1f}\,$G",
+                    # )
+                    # self.lsva[idx, 0].plot(
+                    #     self.B,
+                    #     -1 * lorentzian(self.B, x0, a2, b2, w2),
+                    #     # c=line.get_color(),
+                    #     ls="--",
+                    #     label=rf"$\omega_2={w2:.1f}\,$G",
+                    # )
 
             except RuntimeError:
                 print(f"Could not fit w_{idx + 1} component")
@@ -602,6 +604,33 @@ class DataSet:
         return self
 
 
+def clean_input(folder):
+    if P(folder).is_dir():
+        fnames = []
+        for fold in [fold for fold in P(folder).iterdir() if fold.is_dir()]:
+            if any(
+                [
+                    file
+                    for file in P(fold).iterdir()
+                    if file.suffix == ".feather"
+                ]
+            ):
+                fnames.append(
+                    *[
+                        file
+                        for file in P(fold).iterdir()
+                        if file.suffix == ".feather"
+                    ]
+                )
+    else:
+        if not P(folder).stem.endswith("Decon"):
+            folder = P(folder).parent.joinpath(
+                P(folder).stem + "_batchDecon.feather"
+            )
+        fnames = [folder]
+    return fnames
+
+
 def main(filename):
     DS = DataSet(filename).center()
     DS.normalize()
@@ -628,25 +657,7 @@ if __name__ == "__main__":
         folder = sys.argv[1]
     except IndexError:
         folder = "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2024/2/26/T406C"
-    if P(folder).is_dir():
-        fnames = []
-        for fold in [fold for fold in P(folder).iterdir() if fold.is_dir()]:
-            if any(
-                [
-                    file
-                    for file in P(fold).iterdir()
-                    if file.suffix == ".feather"
-                ]
-            ):
-                fnames.append(
-                    *[
-                        file
-                        for file in P(fold).iterdir()
-                        if file.suffix == ".feather"
-                    ]
-                )
-    else:
-        fnames = [folder]
+    fnames = clean_input(folder)
     for fname in tqdm(fnames):
         try:
             main(fname)

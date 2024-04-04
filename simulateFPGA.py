@@ -39,14 +39,16 @@ def main(IF=101e6, phi=0, DC=True):
     t = np.arange(0, 40e-6, 2e-10)
     mod_freq = 25e3
     B = 50 * np.sin(2 * np.pi * mod_freq * t)
+    baseline = 1
+
     def sigs(x, x0, a, b, c, phase):
-        sigt = absorp(x, x0, a, b, c) 
+        sigt = absorp(x, x0, a, b, c)
         sig = scipy.signal.hilbert(sigt) * np.exp(1j * phi)
         sig *= np.exp(1j * np.pi / 2)
 
         sig /= np.max(np.abs(sig))
         sig *= np.exp(1j * phase)
-        sig += 3 * (1 + 1j)
+        sig += baseline * (1 + 1j)
         sig *= np.exp(1j * 2 * np.pi * 10e9 * t)
         modsig = np.real(sig)
 
@@ -55,26 +57,34 @@ def main(IF=101e6, phi=0, DC=True):
     def mixer(signal, mixIF=100e6):
         o = signal * np.exp(1j * 2 * np.pi * mixIF * t)
         return o
-    
-    chi, modchi = sigs(B, 0, 0, 1, 6, 0)
-    mix = mixer(chi, mixIF=IF)
 
-    fig, ax = plt.subplots(figsize=(8,6), nrows=3)
+    chi, modchi = sigs(B, 0, 0, 1, 6, 0)
+    mix = mixer(chi, mixIF=10e9 + IF)
+
+    fig, ax = plt.subplots(figsize=(8, 6), nrows=3)
 
     if DC:
         mixx = mixer(mix, mixIF=-IF)
-        l1, = ax[1].plot(t, mixx.real, label=r"Exp $\chi'$")
-        l2, = ax[2].plot(t, mixx.imag, label=r"Exp $\chi''$")
-        l3, = ax[0].plot(t, np.abs(mixx) - np.min(np.abs(mixx)) + 3, label=r"Exp $|\chi|$")
-        fig.suptitle('Mixed to DC')
+        (l1,) = ax[1].plot(t, mixx.real, label=r"Exp $\chi'$")
+        (l2,) = ax[2].plot(t, mixx.imag, label=r"Exp $\chi''$")
+        (l3,) = ax[0].plot(
+            t,
+            np.abs(mixx) - np.min(np.abs(mixx)) + baseline,
+            label=r"Exp $|\chi|$",
+        )
+        fig.suptitle("Mixed to DC")
     else:
-        l1, = ax[1].plot(t, mix.real, label=r"Exp $\chi'$")
-        l2, = ax[2].plot(t, mix.imag, label=r"Exp $\chi''$")
-        l3, = ax[0].plot(t, np.abs(mix) - np.min(np.abs(mix)) + 3, label=r"Exp $|\chi|$")
-        fig.suptitle(f'Mixed to {int(IF/1e6)} MHz')
+        (l1,) = ax[1].plot(t, mix.real, label=r"Exp $\chi'$")
+        (l2,) = ax[2].plot(t, mix.imag, label=r"Exp $\chi''$")
+        (l3,) = ax[0].plot(
+            t,
+            np.abs(mix) - np.min(np.abs(mix)) + baseline,
+            label=r"Exp $|\chi|$",
+        )
+        fig.suptitle(f"Mixed to {int(IF/1e6)} MHz")
 
-    l4, = ax[0].plot(t, chi.imag, label=r"True $\chi''$")
-    l5, = ax[0].plot(t, chi.real, label=r"True $\chi'$")
+    (l4,) = ax[0].plot(t, chi.imag, label=r"True $\chi''$")
+    (l5,) = ax[0].plot(t, chi.real, label=r"True $\chi'$")
     # l6, = ax[0].plot(t, np.abs(modchi) + 1, label=r"Mod $\chi''$")
 
     ax[0].legend(), ax[1].legend(), ax[2].legend()
@@ -100,17 +110,17 @@ def main(IF=101e6, phi=0, DC=True):
 
     def update(val):
         chi, modchi = sigs(B, 0, 0, 1, 6, phase_slider.val * np.pi)
-        mix = mixer(chi, mixIF=IF)
+        mix = mixer(chi, mixIF=(10e9 + IF))
         if DC:
             mixx = mixer(mix, mixIF=-IF)
 
             l1.set_ydata(mixx.real)
             l2.set_ydata(mixx.imag)
-            l3.set_ydata(np.abs(mixx) - np.min(np.abs(mixx)) + 3)
+            l3.set_ydata(np.abs(mixx) - np.min(np.abs(mixx)) + baseline)
         else:
             l1.set_ydata(mix.real)
             l2.set_ydata(mix.imag)
-            l3.set_ydata(np.abs(mix) - np.min(np.abs(mix)) + 3)
+            l3.set_ydata(np.abs(mix) - np.min(np.abs(mix)) + baseline)
         # l4.set_ydata(np.imag(chi))
         # l5.set_ydata(np.real(chi))
         # l6.set_ydata(np.abs(modchi) + 1)
@@ -125,5 +135,5 @@ def main(IF=101e6, phi=0, DC=True):
 
 if __name__ == "__main__":
     fig, ax, slider = main(DC=False)
-    # plt.savefig('/Users/Brad/Desktop/fpga-sim.png', dpi=1200)
+    # plt.savefig("/Users/Brad/Desktop/fpga-sim.png", dpi=1200)
     plt.show()
