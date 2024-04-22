@@ -439,12 +439,13 @@ def decon(datajson, coil, amplitude, freq, bphase, harm, modfield):
         sig = d[0].to_numpy(dtype="complex128")
 
         t -= np.min(t)
-        im = -1 * np.imag(hilbert(np.abs(sig)))  # HERE
-        sig += 1j * im
+        # im = -1 * np.imag(hilbert(np.abs(sig)))  # HERE
+        # sig += 1j * im
+        sig = hilbert(np.real(sig))
 
         drive = sindrive(amplitude * coil, freq, t, Bphase=bphase)
 
-        sig -= np.mean(sig)
+        # sig -= np.mean(sig)
         sig /= np.max(np.abs(sig))
 
         r = sig * drive
@@ -493,6 +494,7 @@ def decon(datajson, coil, amplitude, freq, bphase, harm, modfield):
 
         # res = savgol_filter(np.real(res), w, p) + 1j * savgol_filter(np.imag(res), w, p)
         # res *= np.exp(1j * (sigphase + n_clicks * (np.pi/2)))
+        res -= np.mean(res)  # remove any baseline in each channel
 
         outd["B"] = B
         outd["abs"] = np.real(res)

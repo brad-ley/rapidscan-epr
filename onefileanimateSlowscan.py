@@ -41,6 +41,10 @@ if __name__ == "__main__":
     plt.rcParams["lines.linewidth"] = 2
 
 
+def lorentzian_mag(*args):
+    return np.abs(hilbert(lorentzian(*args)))
+
+
 def process(
     filename,
     plotfields,
@@ -175,7 +179,8 @@ def process(
             # SNR[i] = np.max(np.abs(R)) / np.std(np.abs(R[:n]))
             try:
                 popt, pcov = cf(
-                    lorentzian,
+                    # lorentzian,
+                    lorentzian_mag,
                     B,
                     R,
                     p0=[np.min(R), np.max(R), B[np.argmax(R)], 5],
@@ -184,7 +189,8 @@ def process(
                 popt[1] = np.abs(popt[1])
                 popt[3] = np.abs(popt[3])
 
-                fity = lorentzian(B, *popt)
+                # fity = lorentzian(B, *popt)
+                fity = lorentzian_mag(B, *popt)
                 # popt, pcov = cf(gaussian, B, np.real(R), p0=[
                 #                 np.min(np.real(R)), np.max(np.real(R)), B[np.argmax(np.real(R))], 5])
                 # fity = gaussian(B, *popt)
@@ -425,7 +431,7 @@ if __name__ == "__main__":
         )
         ontimes = (pre, pre + on)
     except ValueError:
-        ontimes = (0, 28)
+        ontimes = (0, 0)
         # ontimes = (0, 25)
         print(
             f"Could not detect the experiment timings.\nDefaulting to ON at {ontimes[0]:.1f} s and OFF at {ontimes[1]:.1f} s."

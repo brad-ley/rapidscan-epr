@@ -10,14 +10,25 @@ from readDataFile import read
 from scipy.integrate import solve_ivp
 
 
-def Bloch(T1, T2, dw, freq, amp, t=-1, B1=0.14, sweep='sin', Bphase=-1 / 2 * np.pi, phase=0):
+def Bloch(
+    T1: float,
+    T2: float,
+    dw: float,
+    freq: float,
+    amp: float,
+    t=None,
+    B1=0.14,
+    sweep="sin",
+    Bphase=-1 / 2 * np.pi,
+    phase=0,
+):
     """Bloch. Solves the Bloch equations in the rapidscan regime given input parameters
 
     :param T1: T1 of spin system (s)
     :param T2: T2 of spin system (s)
     :param dw: Field offset (G)
     :param freq: Sweep frequency (Hz)
-    :param amp: Rapidscan field (G) 
+    :param amp: Rapidscan field (G, 0.5 * B_pp)
     :param t: Time (s) -- default is 1/2f with 0.2 ns spacing
     :param B1: B1 (microwave) intensity (G) -- default is 0.14 G
     :param sweep: Sweep profile ('sin' or 'lin')
@@ -26,12 +37,16 @@ def Bloch(T1, T2, dw, freq, amp, t=-1, B1=0.14, sweep='sin', Bphase=-1 / 2 * np.
     :return: t, solution sol(y[0] + 1j*y[1]), omega(t)
     """
     if not type(t) is np.ndarray:
-        t = np.linspace(0, 1 / (2 * freq),  int(1 / (2*freq) / 2e-10)) # 10 data pts for each real pt on digitizer
+        t = np.linspace(
+            0, 1 / (2 * freq), int(1 / (2 * freq) / 2e-10)
+        )  # 10 data pts for each real pt on digitizer
 
-    if sweep == 'sin':
+    if sweep == "sin":
+
         def omega(t):
             return amp * np.sin(2 * np.pi * freq * t + Bphase)
-    elif sweep == 'lin':
+    elif sweep == "lin":
+
         def omega(t):
             return amp * freq * 2 * t
 
@@ -39,11 +54,15 @@ def Bloch(T1, T2, dw, freq, amp, t=-1, B1=0.14, sweep='sin', Bphase=-1 / 2 * np.
 
     def F(t, s):
         return np.dot(
-            np.array([
-                [-1 / T2, -1 * gamma * (dw + omega(t)), 0],
-                [gamma * (dw + omega(t)), -1 / T2, -gamma * B1],
-                [0, gamma * B1, -1 / T1]
-            ]), s) + np.array([0, 0, 1 / T1])
+            np.array(
+                [
+                    [-1 / T2, -1 * gamma * (dw + omega(t)), 0],
+                    [gamma * (dw + omega(t)), -1 / T2, -gamma * B1],
+                    [0, gamma * B1, -1 / T1],
+                ]
+            ),
+            s,
+        ) + np.array([0, 0, 1 / T1])
 
     sol = solve_ivp(F, [np.min(t), np.max(t)], [0, 0, 1], t_eval=t)
     M = sol.y[0] + 1j * sol.y[1]
@@ -55,7 +74,7 @@ def Bloch(T1, T2, dw, freq, amp, t=-1, B1=0.14, sweep='sin', Bphase=-1 / 2 * np.
     return t, sol, omega(t)
 
 
-def main(vary=''):
+def main(vary=""):
     """main.
 
     :param vary: Vary one parameter and plot, can be T1, T2, or Bmod.
@@ -67,59 +86,85 @@ def main(vary=''):
     Bmod = 45
 
     fig, ax = plt.subplots()
-    if vary == 'T1':
+    if vary == "T1":
         ### T1 sweep ###
         for ii, T1 in enumerate(np.logspace(np.log10(T2), -8, 5)):
-            t, sol, omega  = Bloch(T1, T2, 0, f, 45)
+            t, sol, omega = Bloch(T1, T2, 0, f, 45)
             sig = sol.y[0] + 1j * sol.y[1]
             line = ax.plot(
-                sol.t, np.real(sig) / np.max(np.abs(sig)) - 2 * ii, 
-                label=rf'$T_1=$ {T1:.1e} s')
-            ax.plot(sol.t, np.imag(sig) / np.max(np.abs(sig)) -
-                    2 * ii, c=line[0].get_color(), alpha=0.5)
-        title = rf'Rapidscan sim, $T_2=$ {T2:.0e} s, $B_m=$ {int(Bmod)} G'
-    elif vary == 'T2':
+                sol.t,
+                np.real(sig) / np.max(np.abs(sig)) - 2 * ii,
+                label=rf"$T_1=$ {T1:.1e} s",
+            )
+            ax.plot(
+                sol.t,
+                np.imag(sig) / np.max(np.abs(sig)) - 2 * ii,
+                c=line[0].get_color(),
+                alpha=0.5,
+            )
+        title = rf"Rapidscan sim, $T_2=$ {T2:.0e} s, $B_m=$ {int(Bmod)} G"
+    elif vary == "T2":
         ### T2 sweep ###
         for ii, T2 in enumerate(np.logspace(-6, -8, 5)):
-            t, sol, omega  = Bloch(T1, T2, 0, f, 45)
+            t, sol, omega = Bloch(T1, T2, 0, f, 45)
             sig = sol.y[0] + 1j * sol.y[1]
             line = ax.plot(
-                sol.t, np.real(sig) / np.max(np.abs(sig)) - 2 * ii, 
-                label=rf'$T_2=$ {T2:.1e} s')
-            ax.plot(sol.t, np.imag(sig) / np.max(np.abs(sig)) -
-                    2 * ii, c=line[0].get_color(), alpha=0.5)
-        title = rf'Rapidscan sim, $T_1=$ {T1:.0e} s, $B_m=$ {int(Bmod)} G'
-    elif vary == 'Bmod':
+                sol.t,
+                np.real(sig) / np.max(np.abs(sig)) - 2 * ii,
+                label=rf"$T_2=$ {T2:.1e} s",
+            )
+            ax.plot(
+                sol.t,
+                np.imag(sig) / np.max(np.abs(sig)) - 2 * ii,
+                c=line[0].get_color(),
+                alpha=0.5,
+            )
+        title = rf"Rapidscan sim, $T_1=$ {T1:.0e} s, $B_m=$ {int(Bmod)} G"
+    elif vary == "Bmod":
         ### Bmod sweep ###
         for ii, Bmod in enumerate(np.linspace(1, 50, 5)):
-            t, sol, omega  = Bloch(1e-6, 3e-7, 0, f, Bmod)
+            t, sol, omega = Bloch(1e-6, 3e-7, 0, f, Bmod)
             sig = sol.y[0] + 1j * sol.y[1]
             line = ax.plot(
-                sol.t, np.real(sig) / np.max(np.abs(sig)) - 2 * ii, 
-                label=rf'$B_m=$ {int(Bmod)} G')
-            ax.plot(sol.t, np.imag(sig) / np.max(np.abs(sig)) -
-                    2 * ii, c=line[0].get_color(), alpha=0.5)
-        title = rf'Rapidscan sim, $T_1=$ {T1:.0e} s, $T_2=$ {T2:.0e} s'
+                sol.t,
+                np.real(sig) / np.max(np.abs(sig)) - 2 * ii,
+                label=rf"$B_m=$ {int(Bmod)} G",
+            )
+            ax.plot(
+                sol.t,
+                np.imag(sig) / np.max(np.abs(sig)) - 2 * ii,
+                c=line[0].get_color(),
+                alpha=0.5,
+            )
+        title = rf"Rapidscan sim, $T_1=$ {T1:.0e} s, $T_2=$ {T2:.0e} s"
     else:
-        t, sol, omega  = Bloch(T1, T2, 0, f, Bmod)
+        t, sol, omega = Bloch(T1, T2, 0, f, Bmod)
         sig = sol.y[0] + 1j * sol.y[1]
-        line = ax.plot(
-            sol.t, np.real(sig) / np.max(np.abs(sig)))
-        ax.plot(sol.t, np.imag(sig) / np.max(np.abs(sig)),
-                c=line[0].get_color(), alpha=0.5)
-        title = rf'Rapidscan sim, $T_1=$ {T1:.0e} s, $T_2=$ {T2:.0e} s, $B_m=$ {int(Bmod)} G'
-        
+        line = ax.plot(sol.t, np.real(sig) / np.max(np.abs(sig)))
+        ax.plot(
+            sol.t,
+            np.imag(sig) / np.max(np.abs(sig)),
+            c=line[0].get_color(),
+            alpha=0.5,
+        )
+        title = rf"Rapidscan sim, $T_1=$ {T1:.0e} s, $T_2=$ {T2:.0e} s, $B_m=$ {int(Bmod)} G"
 
     axr = ax.twinx()
     axr.plot(t, omega)
-    axr.set_ylabel('Field (G)')
+    axr.set_ylabel("Field (G)")
     ax.set_yticklabels([])
-    ax.set_ylabel('Signal (arb. u)')
-    ax.set_xlabel('Time (s)')
-    if vary != '':
+    ax.set_ylabel("Signal (arb. u)")
+    ax.set_xlabel("Time (s)")
+    if vary != "":
         ax.legend()
     ax.set_title(title)
-    fig.savefig('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/simulations' + title + '.png', transparent=True, dpi=400)
+    fig.savefig(
+        "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/simulations"
+        + title
+        + ".png",
+        transparent=True,
+        dpi=400,
+    )
     # ax.plot(t, sol)
 
 
