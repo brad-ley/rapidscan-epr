@@ -179,8 +179,8 @@ def process(
             # SNR[i] = np.max(np.abs(R)) / np.std(np.abs(R[:n]))
             try:
                 popt, pcov = cf(
-                    # lorentzian,
-                    lorentzian_mag,
+                    lorentzian,
+                    # lorentzian_mag,
                     B,
                     R,
                     p0=[np.min(R), np.max(R), B[np.argmax(R)], 5],
@@ -189,8 +189,8 @@ def process(
                 popt[1] = np.abs(popt[1])
                 popt[3] = np.abs(popt[3])
 
-                # fity = lorentzian(B, *popt)
-                fity = lorentzian_mag(B, *popt)
+                fity = lorentzian(B, *popt)
+                # fity = lorentzian_mag(B, *popt)
                 # popt, pcov = cf(gaussian, B, np.real(R), p0=[
                 #                 np.min(np.real(R)), np.max(np.real(R)), B[np.argmax(np.real(R))], 5])
                 # fity = gaussian(B, *popt)
@@ -382,7 +382,7 @@ if __name__ == "__main__":
             P(filename).stem + "_batchDecon.feather"
         )
         # P(filename).stem + '_batchDecon.dat')
-    plotfields = 0 + 30 * np.array([-1, 1])
+    plotfields = 8.5 + 30 * np.array([-1, 1])
     try:
         on = float(
             "".join(
