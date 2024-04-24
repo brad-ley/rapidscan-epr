@@ -80,9 +80,11 @@ def deconvolve(signal):
 
 def main():
     t, sig = bloch_signal(baseline=0)
-    signal = sig.y[0] + 1j * sig.y[1]
-    baseline = 1
-    signal += baseline * (1 + 1j)
+    chi = (sig.y[0] + 0.1 * np.random.standard_normal(len(sig.y[0]))) + 1j * (
+        sig.y[1] + 0.1 * np.random.standard_normal(len(sig.y[0]))
+    )
+    baseline = 10
+    signal = chi + baseline * (1 + 1j)
     mixIF = mixer(signal, LO=10e9, phase=0)
     mix_to_detect = mixer(mixIF, LO=10e9 + 100e6)
     decon = deconvolve(signal)
@@ -97,7 +99,16 @@ def main():
     a0l1 = plot(t, np.imag(signal), ax=a[0], label=r"$\chi''$")
     a0l2 = plot(t, np.real(signal), ax=a[0], label=r"$\chi'$")
     a0l3 = plot(t, np.abs(signal), ax=a[0], label=r"$|\chi|$")
+    a0l4 = plot(
+        t,
+        np.sqrt(2) * baseline
+        + (np.real(chi) + np.imag(chi)) / np.sqrt(2)
+        + 0.1,
+        ax=a[0],
+        label=r"$2\sqrt{a}+\frac{\chi'+\chi''}{\sqrt{2}}$",
+    )
     fieldlim = 2
+    tx = a[1].text(0.6, 0, "SNR chi:\nSNR abs(chi):", transform=a[1].transAxes)
     a1l1 = plot(
         plotfield[np.abs(plotfield) < fieldlim],
         np.imag(decon)[np.abs(plotfield) < fieldlim],
@@ -171,6 +182,13 @@ def main():
                     np.max(np.imag(dabs)[np.abs(plotfield) < fieldlim]),
                 ),
             ]
+        )
+        signal_single = np.abs(np.max(np.imag(decon)) - np.min(np.imag(decon)))
+        noise_single = np.std(np.imag(decon)[:1024])
+        signal_mag = np.abs(np.max(np.imag(dabs)) - np.min(np.imag(dabs)))
+        noise_mag = np.std(np.imag(dabs)[:1024])
+        tx.set_text(
+            f"SNR chi'':{signal_single/noise_single:.1f}\nSNR abs(chi):{signal_mag/noise_mag:.1f}\n"
         )
         f.canvas.draw_idle()
 

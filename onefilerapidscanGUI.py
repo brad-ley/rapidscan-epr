@@ -439,9 +439,9 @@ def decon(datajson, coil, amplitude, freq, bphase, harm, modfield):
         sig = d[0].to_numpy(dtype="complex128")
 
         t -= np.min(t)
-        # im = -1 * np.imag(hilbert(np.abs(sig)))  # HERE
-        # sig += 1j * im
-        sig = hilbert(np.real(sig))
+        im = np.imag(hilbert(np.abs(sig)))  # HERE
+        sig += -1j * im
+        # sig = hilbert(np.real(sig))
 
         drive = sindrive(amplitude * coil, freq, t, Bphase=bphase)
 
