@@ -8,9 +8,9 @@ from scipy.optimize import curve_fit
 
 if __name__ == "__main__":
     plt.style.use(["science"])
-    rc("text.latex", preamble=r"\usepackage{cmbright}")
+    # rc("text.latex", preamble=r"\usepackage{cmbright}")
     rcParams = [
-        ["font.family", "sans-serif"],
+        # ["font.family", "sans-serif"],
         ["font.size", 14],
         ["axes.linewidth", 1],
         ["lines.linewidth", 2],
@@ -43,11 +43,15 @@ def main(filename):
         np.log10(data["avgs"]),
         linfit(np.log10(data["avgs"]), *popt),
         ls="--",
-        c="k",
-        alpha=0.5,
+        c="r",
+        # alpha=0.5,
         label=rf"Fit: $m={{{popt[0]:.2f}}}$",
     )
-    a.legend(loc="upper left", frameon=True)
+    a.legend(frameon=False,
+             handletextpad=0.25,
+             handlelength=1,
+             labelspacing=0.25,
+             )
     # a.set_xscale("log")
     # a.set_yscale("log")
     a.set_ylabel(r"$Log_{10}$(SNR)")

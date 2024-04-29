@@ -27,20 +27,20 @@ from filterReal import isdigit
 # plt.rcParams['ytick.minor.width'] = 1
 # plt.rcParams['lines.linewidth'] = 4
 if True:
-    plt.style.use(['science'])
+    plt.style.use(["science"])
     # rc('text.latex', preamble=r'\usepackage{cmbright}')
-    plt.rcParams['font.family'] = 'serif'
-    plt.rcParams['font.size'] = 14
-    plt.rcParams['axes.linewidth'] = 1
-    plt.rcParams['xtick.major.size'] = 5
-    plt.rcParams['xtick.major.width'] = 1
-    plt.rcParams['xtick.minor.size'] = 2
-    plt.rcParams['xtick.minor.width'] = 1
-    plt.rcParams['ytick.major.size'] = 5
-    plt.rcParams['ytick.major.width'] = 1
-    plt.rcParams['ytick.minor.size'] = 2
-    plt.rcParams['ytick.minor.width'] = 1
-    plt.rcParams['lines.linewidth'] = 2
+    plt.rcParams["font.family"] = "serif"
+    plt.rcParams["font.size"] = 14
+    plt.rcParams["axes.linewidth"] = 1
+    plt.rcParams["xtick.major.size"] = 5
+    plt.rcParams["xtick.major.width"] = 1
+    plt.rcParams["xtick.minor.size"] = 2
+    plt.rcParams["xtick.minor.width"] = 1
+    plt.rcParams["ytick.major.size"] = 5
+    plt.rcParams["ytick.major.width"] = 1
+    plt.rcParams["ytick.minor.size"] = 2
+    plt.rcParams["ytick.minor.width"] = 1
+    plt.rcParams["lines.linewidth"] = 2
 
 
 def exp(x, A, B, c):
@@ -49,10 +49,10 @@ def exp(x, A, B, c):
 
 # def strexp(x, A, B, c, i):
 def strexp(x, A, B, c, d):
-# def strexp(x, A, B, c):
+    # def strexp(x, A, B, c):
     # return A + B * np.exp(-(x / c)**(4/(4 + 2)))
 
-    return A + B * np.exp(-(x / c)**d)
+    return A + B * np.exp(-((x / c) ** d))
 
 
 def log(x, A, B, c, d):
@@ -71,27 +71,36 @@ def plotfits(filename, ontimes=(0, -1)):
 
     if P(filename).is_dir():
         filename = [
-            ii for ii in P(filename).iterdir()
-
-            if ii.name.endswith('_fitparams.txt')
+            ii
+            for ii in P(filename).iterdir()
+            if ii.name.endswith("_fitparams.txt")
         ][0]
 
     # print(P(filename).read_text())
     try:
         data = ast.literal_eval(P(filename).read_text())
         times = [
-            float(''.join([
-                ii for ii in ''.join(
-                    [ll for ll in P(bb).stem.split('_') if 't=' in ll])
-
-                if (isdigit(ii) or ii == '.')
-            ])) for bb in data.keys() if 'popt' in bb
+            float(
+                "".join(
+                    [
+                        ii
+                        for ii in "".join(
+                            [ll for ll in P(bb).stem.split("_") if "t=" in ll]
+                        )
+                        if (isdigit(ii) or ii == ".")
+                    ]
+                )
+            )
+            for bb in data.keys()
+            if "popt" in bb
         ]
     except ValueError:
         data = ast.literal_eval(P(filename).read_text())
         times = np.array(
             ast.literal_eval(
-                P(filename).parent.joinpath('times.txt').read_text()))
+                P(filename).parent.joinpath("times.txt").read_text()
+            )
+        )
 
     tstep = np.mean(np.diff(times))
     ts = np.insert(np.diff(times), 0, 0)
@@ -100,7 +109,7 @@ def plotfits(filename, ontimes=(0, -1)):
     fits = []
 
     for ii, key in enumerate(data.keys()):
-        if 'popt' in key:
+        if "popt" in key:
             popt = ast.literal_eval(data[key])
             fits.append(popt)
 
@@ -113,28 +122,29 @@ def plotfits(filename, ontimes=(0, -1)):
     try:
         # if True:
         peaksname = P(filename).parent.joinpath(
-            P(filename).stem.rstrip('fitparams.txt') + 'peaks.txt')
+            P(filename).stem.rstrip("fitparams.txt") + "peaks.txt"
+        )
         peaks = np.loadtxt(peaksname)
         # fits = np.c_[fits, peaks[:len(fits), 1]]
         fits = np.c_[fits, peaks[:, 1]]
         # Raw A has to go last here bc of concatenation
         fitdict = {
-            1: r'$\Delta y$',
-            2: 'A',
-            3: '$x_0$',
-            4: r'$\Delta \omega$',
-            5: 'Peak-to-peak',
-            6: 'Raw pk2pkh',
-            7: 'Raw A'
+            1: r"$\Delta y$",
+            2: "A",
+            3: "$x_0$",
+            4: r"$\Delta \omega$",
+            5: "Peak-to-peak",
+            6: "Raw pk2pkh",
+            7: "Raw A",
         }
     except FileNotFoundError:
         fitdict = {
-            1: r'$\Delta y$',
-            2: 'A',
-            3: '$x_0$',
-            4: r'$\Delta \omega$',
-            5: 'Peak-to-peak',
-            6: 'Raw pk2pkh'
+            1: r"$\Delta y$",
+            2: "A",
+            3: "$x_0$",
+            4: r"$\Delta \omega$",
+            5: "Peak-to-peak",
+            6: "Raw pk2pkh",
         }
 
     try:
@@ -163,11 +173,11 @@ def plotfits(filename, ontimes=(0, -1)):
                 #     ls='--',
                 #     alpha=0.5,
                 #     )
-                
+
                 ### LiPC ###
                 ### LiPC ###
-                if fitdict[key] == r'$\Delta \omega$':
-                # if fitdict[key] in ['Peak-to-peak']:
+                if fitdict[key] == r"$\Delta \omega$":
+                    # if fitdict[key] in ['Peak-to-peak']:
                     # select = np.logical_and(
                     #     fits[:, i] > 0, fits[:, i] < 1.1 * np.mean(fits[:, i]))
                     select = [True] * len(fits[:, i])
@@ -175,13 +185,13 @@ def plotfits(filename, ontimes=(0, -1)):
                     # print(select)
                     # print(ts[select], fits[:, i][select])
 
-                    if fitdict[key] == 'Peak-to-peak':
-                        label = 'pk2pk'
-                    elif fitdict[key] == 'Raw pk2pkh':
-                        label = 'pk2pk'
+                    if fitdict[key] == "Peak-to-peak":
+                        label = "pk2pk"
+                    elif fitdict[key] == "Raw pk2pkh":
+                        label = "pk2pk"
                     else:
                         # label = fitdict[key].strip('$')
-                        label = r'$\Delta B$'
+                        label = r"$\Delta B$"
 
                     ### LiPC ###
                     # popt, pcov = cf(
@@ -192,7 +202,7 @@ def plotfits(filename, ontimes=(0, -1)):
                     #     p0=[
                     #         0,
                     #         np.max(fits[:, i]),
-                    #         100, 
+                    #         100,
                     #         1
                     #     ])
                     ### LiPC ###
@@ -203,8 +213,9 @@ def plotfits(filename, ontimes=(0, -1)):
                         p0=[
                             np.max(fits[:, i]),
                             -(np.max(fits[:, i]) - np.min(fits[:, 1])),
-                            np.max(fitt) / 2
-                        ])
+                            np.max(fitt) / 2,
+                        ],
+                    )
                     line = axw.scatter(
                         ts[select],
                         # np.abs(fits[:, i])[select],
@@ -215,22 +226,24 @@ def plotfits(filename, ontimes=(0, -1)):
                         yw,
                         label=label,
                         # label=rf'${label}$',
-                        c='black',
-                        )
+                        c="black",
+                    )
 
-                    err95 = 2*np.sqrt(np.diag(pcov))
+                    err95 = 2 * np.sqrt(np.diag(pcov))
                     outstr = f"offset, amplitude, time constant (s)\n{popt[0]:.4f}, {popt[1]:.4f}, {popt[2]:.4f}\n--------------------\n95% confidence\n{err95[0]:.2e}, {err95[1]:.2e}, {err95[2]:.2e}\n"
-                    P(filename).parent.joinpath('LWfit-values.txt').write_text(
-                        outstr)
+                    P(filename).parent.joinpath("LWfit-values.txt").write_text(
+                        outstr
+                    )
 
                     if np.sqrt(np.diag(pcov))[-1] == 0 or np.isinf(
-                            np.sqrt(np.diag(pcov))[-1]):
-                        fitlabel = rf'$\tau_{{{label}}}={popt[2]:.1f}\pm$NaN'
+                        np.sqrt(np.diag(pcov))[-1]
+                    ):
+                        fitlabel = rf"$\tau_{{{label}}}={popt[2]:.1f}\pm$NaN"
                         ### LiPC ###
                         # fitlabel = rf'$\tau={popt[2]:.1f}\pm$NaN'
                         ### LiPC ###
                     else:
-                        fitlabel = rf'$\tau_{{{label}}}={popt[2]:.1f}\pm{np.sqrt(np.diag(pcov))[-1]:.1f}$ s'
+                        fitlabel = rf"$\tau_{{{label}}}={popt[2]:.1f}\pm{np.sqrt(np.diag(pcov))[-1]:.1f}$ s"
                         ### LiPC ###
                         # fitlabel = rf'$\tau={popt[2]:.1f}\pm{err95[2]:.1f}$ s' + '\n' + rf'$d={popt[3]:.2f}\pm{err95[3]:.2f}$'
                         # fitlabel = rf'$\tau={popt[2]:.1f}\pm{err95[2]:.1f}$ s'
@@ -266,7 +279,7 @@ def plotfits(filename, ontimes=(0, -1)):
 
                     fill1 = exp(fitt, *popt_1) / np.max(exp(fitt, *popt_1))
                     fill3 = exp(fitt, *popt_3) / np.max(exp(fitt, *popt_3))
-                    if 'fillarray' in locals():
+                    if "fillarray" in locals():
                         fillarray = np.vstack((fillarray, fill1, fill3))
                     else:
                         fillarray = np.vstack((fill1, fill3))
@@ -295,17 +308,17 @@ def plotfits(filename, ontimes=(0, -1)):
                         # strexp(fitt, *popt),
                         ### LiPC ###
                         exp(fitt, *popt),
-
-                        c='red',
-                        ls='--',
+                        c="red",
+                        ls="--",
                         # label=fitlabel)
                         # label=f'$\tau={popt[-1]:.1f}\pm{np.sqrt(np.diag(pcov))[-1]:.1f}\,$s')
-                        label=rf'$\tau={popt[-1]:.1f}\,$s')
+                        label=rf"$\tau={popt[-1]:.1f}\,$s",
+                    )
 
             except RuntimeError:
-            # except IndexError:
+                # except IndexError:
                 pass
-            line = ax.scatter(ts, y, label=f'{fitdict[key]}, {popt[-1]:.1f} s')
+            line = ax.scatter(ts, y, label=f"{fitdict[key]}, {popt[-1]:.1f} s")
             # if fitdict[key] in [r'$\Delta \omega$', 'Peak-to-peak']:
 
     # except IndexError:
@@ -316,8 +329,8 @@ def plotfits(filename, ontimes=(0, -1)):
 
     # ax.set_ylim(top=1.25)
     # ax.set_xlim()
-    ax.set_ylabel('Fit value (arb. u)')
-    axw.set_ylabel(r'$\Delta$Linewidth (G) $\propto R^{-3}_{AB}$')
+    ax.set_ylabel("Fit value (arb. u)")
+    axw.set_ylabel(r"Linewidth (G)")
     ### LiPC ###
     ### LiPC ###
     # axw.set_ylim(bottom=0)
@@ -326,21 +339,22 @@ def plotfits(filename, ontimes=(0, -1)):
         a.axvspan(
             ontimes[0],
             ontimes[1],
-            facecolor='#00A7CA',
+            facecolor="#00A7CA",
             ### LiPC ###
             # facecolor='gray',
             ### LiPC ###
             alpha=0.25,
-            label='Laser on')
-            ### LiPC ###
-            # label='N$_2$')
-            ### LiPC ###
+            label="Laser on",
+        )
         ### LiPC ###
-        a.annotate('b)', (0, 1.26))
+        # label='N$_2$')
+        ### LiPC ###
+        ### LiPC ###
+        a.annotate("b)", (0, 1.26))
         # a.annotate('N$_2$', (5, 1.19))
         # a.annotate('Air', (ontimes[1] + 5, 1.19))
         ### LiPC ###
-        a.set_xlabel('Time (s)')
+        a.set_xlabel("Time (s)")
 
         if a == ax:
             a.legend(handletextpad=0.5, handlelength=1, loc=(1, 0))
@@ -348,47 +362,60 @@ def plotfits(filename, ontimes=(0, -1)):
             handles, labels = a.get_legend_handles_labels()
             # order = [2, 0, 1]
             order = range(len(handles))
-            a.legend([handles[idx] for idx in order],
-                     [labels[idx] for idx in order],
-                     handletextpad=0.25,
-                     handlelength=1,
-                     labelspacing=0.25,
-                     markerfirst=False)
+            a.legend(
+                [handles[idx] for idx in order],
+                [labels[idx] for idx in order],
+                handletextpad=0.25,
+                handlelength=1,
+                labelspacing=0.25,
+                markerfirst=False,
+            )
     # fig.savefig(P(filename).parent.joinpath('timedepfits.png'), dpi=400, transparent=True)
     # figw.savefig(P(filename).parent.joinpath('LWfit.png'), dpi=400, transparent=True)
-    fig.savefig(P(filename).parent.joinpath('timedepfits.png'),
-                dpi=400,
-                transparent=False)
-    figw.savefig(P(filename).parent.joinpath('LWfit.png'),
-                 dpi=1200,
-                 transparent=False)
+    fig.savefig(
+        P(filename).parent.joinpath("timedepfits.png"),
+        dpi=400,
+        transparent=False,
+    )
+    figw.savefig(
+        P(filename).parent.joinpath("LWfit.png"), dpi=1200, transparent=False
+    )
     # plt.show()
 
 
 if __name__ == "__main__":
-    filename = '/Volumes/GoogleDrive/My Drive/Research/Data/2022/10/14/10000 scans/128mA_on5s_off175s_F0003_onefileDecon_combined_fits.dat'
+    filename = "/Volumes/GoogleDrive/My Drive/Research/Data/2022/10/14/10000 scans/128mA_on5s_off175s_F0003_onefileDecon_combined_fits.dat"
 
     if P(filename).is_file():
         filename = [
-            ii for ii in P(filename).parent.iterdir()
-
-            if ii.stem.endswith('combined_fitparams')
+            ii
+            for ii in P(filename).parent.iterdir()
+            if ii.stem.endswith("combined_fitparams")
         ][0]
     else:
         filename = [
-            ii for ii in P(filename).iterdir()
-
-            if ii.stem.endswith('combined_fitparams')
+            ii
+            for ii in P(filename).iterdir()
+            if ii.stem.endswith("combined_fitparams")
         ][0]
 
     try:
         # if True:
-        FIT_T = float(''.join([
-            kk for kk in ''.join(
-                [ii for ii in P(filename).stem.split('_') if 'on' in ii])
-
-            if (isdigit(kk) or kk == '.')
-        ]))
+        FIT_T = float(
+            "".join(
+                [
+                    kk
+                    for kk in "".join(
+                        [
+                            ii
+                            for ii in P(filename).stem.split("_")
+                            if "on" in ii
+                        ]
+                    )
+                    if (isdigit(kk) or kk == ".")
+                ]
+            )
+        )
     except ValueError:
         FIT_T = 0
     plotfits(filename, FIT_T=FIT_T)

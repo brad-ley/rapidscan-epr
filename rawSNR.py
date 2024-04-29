@@ -36,7 +36,6 @@ def main(filename):
         # if not _:
         start = int(0.05 * len(row)) + 32
         stop = 32
-        print(_)
         if True:
             ax.plot(row)  # type: ignore
             ax.axvspan(
@@ -59,6 +58,6 @@ def main(filename):
 
 
 if __name__ == "__main__":
-    filename = "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2024/4/10/filter freqs/2.5 MHz/106mA_23.6kHz_acq10s_25000avgs_filtered.dat"
+    filename = "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2024/4/10/avgs/250/106mA_23.6kHz_acq10s_250avgs_filtered.dat"
     main(filename)
     plt.show()

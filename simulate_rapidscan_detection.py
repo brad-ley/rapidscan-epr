@@ -99,14 +99,14 @@ def main():
     a0l1 = plot(t, np.imag(signal), ax=a[0], label=r"$\chi''$")
     a0l2 = plot(t, np.real(signal), ax=a[0], label=r"$\chi'$")
     a0l3 = plot(t, np.abs(signal), ax=a[0], label=r"$|\chi|$")
-    a0l4 = plot(
-        t,
-        np.sqrt(2) * baseline
-        + (np.real(chi) + np.imag(chi)) / np.sqrt(2)
-        + 0.1,
-        ax=a[0],
-        label=r"$2\sqrt{a}+\frac{\chi'+\chi''}{\sqrt{2}}$",
-    )
+    # a0l4 = plot(
+    #     t,
+    #     np.sqrt(2) * baseline
+    #     + (np.real(chi) + np.imag(chi)) / np.sqrt(2)
+    #     + 0.1,
+    #     ax=a[0],
+    #     label=r"$2\sqrt{a}+\frac{\chi'+\chi''}{\sqrt{2}}$",
+    # )
     fieldlim = 2
     tx = a[1].text(0.6, 0, "SNR chi:\nSNR abs(chi):", transform=a[1].transAxes)
     a1l1 = plot(
