@@ -198,8 +198,9 @@ class DataSet:
             )
             k = np.where(ratios < 1.5)[0][0]  # find first time it goes below 2
 
-        if k == 0:
-            k = 1
+        # if k == 0:
+        if k < 2:
+            k = 2
         self.k = k
 
         self.U = U[:, :k]

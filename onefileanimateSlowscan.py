@@ -382,7 +382,12 @@ if __name__ == "__main__":
             P(filename).stem + "_batchDecon.feather"
         )
         # P(filename).stem + '_batchDecon.dat')
-    plotfields = 8.5 + 30 * np.array([-1, 1])
+
+    try:
+        pf = float(sys.argv[2])
+    except IndexError:
+        pf = 0
+    plotfields = pf + 30 * np.array([-1, 1])
     try:
         on = float(
             "".join(
