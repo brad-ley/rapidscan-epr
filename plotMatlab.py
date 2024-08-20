@@ -54,22 +54,7 @@ def main(filename, ri, rf, numplots):
         if "mod" in filename.stem.lower():
             y = cumtrapz(y)
 
-        line = ax.plot(x, y / np.max(y) - c)
-        try:
-            popt, pcov = curve_fit(
-                lorentzian, x, y, p0=[0, np.max(y), 8608, 1]
-            )
-            fit = lorentzian(x, *popt)
-            ax.plot(
-                x,
-                fit / np.max(fit) - c,
-                c=line[0].get_color(),
-                ls="--",
-                label=rf"{i},{r[i-1]*1e9:.2f} nm; $\Delta\omega={popt[3]*10:.2f}$ G",
-            )
-        except RuntimeError:
-            pass
-
+        line = ax.plot(x, y / np.max(y) - c, label=f"{r[i-1]*1e9:.1f} nm")
         c += 1
 
     # ax.imshow(data[1:, :], aspect='auto')
@@ -80,7 +65,7 @@ def main(filename, ri, rf, numplots):
     ax.legend(loc=(1, 0.0))
 
     fig.savefig(
-        P(filename).parent.joinpath(P(filename).stem + "_fit-fig.png"), dpi=500
+        P(filename).parent.joinpath(P(filename).stem + "_fig.png"), dpi=600
     )
 
 
@@ -91,7 +76,7 @@ if __name__ == "__main__":
     #     main(f)
     # filename = P('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/results_room_T_1.55_-7.72.txt')
     filename = P(
-        "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/small_lorentz_results_room_T_0.7_-8.2.txt"
+        "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/tumbling_pake_1-2_7-2_unlike.txt"
     )
     main(filename, ri=2.3, rf=6, numplots=6)
     plt.show()

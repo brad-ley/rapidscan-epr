@@ -68,7 +68,7 @@ def simulate_matrix(params, pakes, single, t, r):
     matrix = np.zeros((len(t), len(pakes[0, :])))
     for i, ti in enumerate(t):
         pake_r = lin_combo(
-            pakes,
+            A * pakes,
             double_gaussian(
                 r,
                 r0,
@@ -81,15 +81,17 @@ def simulate_matrix(params, pakes, single, t, r):
             ),
         )
 
-        matrix[i, :] = A * np.convolve(single, pake_r, mode="same")
+        matrix[i, :] = np.convolve(single, pake_r, mode="same")
 
     return matrix
 
 
 def main(filename, ri, rf, numplots=-1):
     mat = feather.read_feather(filename)
+    if mat["B"].iloc[-1] < mat["B"].iloc[0]:
+        mat = mat.iloc[::-1]
     cols = [ii for ii in mat.columns if "abs" in ii]
-    plotfield = 27
+    plotfield = 30
     # plotcenter = -15
     B = mat["B"].to_numpy()
     first = mat[cols[0]].to_numpy()[np.abs(B) < plotfield]
@@ -127,9 +129,8 @@ def main(filename, ri, rf, numplots=-1):
                 rolling = np.array(
                     [
                         np.mean(tdat[ii - n : ii + n])
-                        if (ii > n and len(tdat) - ii > n)
-                        else 0
                         for ii, _ in enumerate(tdat)
+                        if ii > n
                     ]
                 )
                 center = np.argmax(rolling) + l
@@ -157,24 +158,20 @@ def main(filename, ri, rf, numplots=-1):
 
     _data = np.loadtxt(
         P(
-            "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/solid_results_room_T.txt"
+            "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/tumbling_pake_1-2_7-2_unlike.txt"
         ),
         delimiter=",",
     )
-    br = np.loadtxt(
-        P(
-            "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Code/dipolar averaging/singlespin_lorentz_results_room_T_0.4_-7.72.txt"
-        ),
-        delimiter=",",
-    )
-    single_file = "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2024/3/21/283.1 K/105mA_23.6kHz_pre30s_on30s_off240s_10000avgs_filtered_batchDecon.feather"
+    single_file = "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2024/7/30/282.8 K/102mA_23.5kHz_pre30s_on10s_off410s_25000avgs_filtered_batchDecon.feather"
     _mat = feather.read_feather(single_file)
     _cols = [ii for ii in _mat.columns if "abs" in ii]
-    _plotfield = 27
+    _plotfield = plotfield
     # plotcenter = -15
-    _B = mat["B"].to_numpy()
-    _first = mat[_cols[0]].to_numpy()[np.abs(_B) < _plotfield]
-    _plotcenter = B[
+    if _mat["B"].iloc[-1] < _mat["B"].iloc[0]:
+        _mat = _mat.iloc[::-1]
+    _B = _mat["B"].to_numpy()
+    _first = _mat[_cols[0]].to_numpy()[np.abs(_B) < _plotfield]
+    _plotcenter = _B[
         np.where(np.abs(_B) < _plotfield)[0][0] + np.argmax(_first)
     ]
     # plotcenter = B[np.argmax(first[np.abs(B) < plotfield])]
@@ -183,11 +180,12 @@ def main(filename, ri, rf, numplots=-1):
     _lims = np.where(np.logical_and(_B >= _plotlim[0], _B < _plotlim[1]))
     _l = _lims[0][0]
     _h = _lims[0][-1]
-    _specB = _B[l:h] - _plotcenter
+
+    _specB = _B[_l:_h] - _plotcenter
     # CENTERING ###
 
     if True:
-        if (
+        if not (
             P(single_file)
             .parent.joinpath(P(single_file).stem + "_centered.dat")
             .exists()
@@ -205,16 +203,16 @@ def main(filename, ri, rf, numplots=-1):
             for _ind, _col in enumerate(_cols):
                 # center = np.argmax(mat[col][l:h].to_numpy()) + l
                 _tdat = _mat[_col][_l:_h].to_numpy()
-                # n = 2**3
+                # n = 2**2
                 _rolling = np.array(
                     [
-                        np.mean(_tdat[ii - n : ii + n])
-                        if (ii > n and len(_tdat) - ii > n)
-                        else 0
-                        for ii, _ in enumerate(adjusted_spectra[:, 0])
+                        np.mean(_tdat[ii - n : ii])
+                        for ii, _ in enumerate(_tdat)
+                        if ii > n
                     ]
                 )
-                _center = np.argmax(_rolling) + _l
+
+                _center = np.argmax(_rolling) + n + _l
                 _coldat = _mat[_col].to_numpy()
                 try:
                     _adjusted_spectra[_ind, :] = _coldat[
@@ -242,7 +240,6 @@ def main(filename, ri, rf, numplots=-1):
                 )
             )
 
-    _br = np.copy(_adjusted_spectra)
     ### CENTERING ###
     # fig, ax = plt.subplots(figsize=(6,4), layout='constrained')
 
@@ -253,13 +250,14 @@ def main(filename, ri, rf, numplots=-1):
     B = B_full[
         np.abs(B_full) < np.min(np.abs([np.max(B_full), np.min(B_full)]))
     ]
+    # B = specB
     # B = B_full[np.abs(B_full) < plotfield]
     dists = _data[1:, :]
     dists -= np.min(dists)
 
     r = np.linspace(ri, rf, len(_data[1:, 0]))
 
-    tscale = 25e3 / 23.3e3
+    tscale = 25e3 / 23.5e3
     t = np.linspace(
         0, tscale * adjusted_spectra.shape[0], adjusted_spectra.shape[0]
     )
@@ -281,28 +279,38 @@ def main(filename, ri, rf, numplots=-1):
 
     # want to deconvolve the base one with a 2.3 nm center
     # single = np.interp(B, (_br[0, :] - _br[0, np.argmax(_br[-1, :])]) * 10, _br[-1, :])
-    n_br = _br[-1, :]
+    _br = np.copy(_adjusted_spectra)
+    n_br = _br[0, :]
     n_br -= np.min(n_br)
-    n_br /= np.max(n_br)
+    # n_br /= np.max(n_br)
     single = np.interp(B, _specB, n_br, left=0, right=0)
+    # f = interp1d(_specB, n_br, fill_value="extrapolate")
+    # single = f(B)
     # single = adjusted_spectra_zeros[0, :]
     # single -= np.min(single)
     # single /= np.max(single)
 
+    plt.plot(B, single / np.max(single))
+    plt.plot(
+        B,
+        adjusted_spectra_zeros[0, :] / np.max(adjusted_spectra_zeros[0, :]),
+        label="zeros",
+    )
+    plt.legend()
+    plt.show()
+
     # add with tuples: (NAME VALUE VARY MIN  MAX  EXPR  BRUTE_STEP)
     params = lmfit.create_params(
-        A=dict(
-            value=0.5, vary=True, min=0, max=np.max(adjusted_spectra_zeros)
-        ),
+        A=dict(value=0.5, vary=False, min=0, max=np.max(single)),
         tau=dict(
             value=np.max(t) / 5,
             vary=True,
             min=np.max(t) / 10,
             max=np.max(t) / 2,
         ),
-        alpha=dict(value=0.5, vary=True, min=0, max=1),
-        tstart=dict(value=30, vary=False, min=0, max=np.max(t)),
-        r0=dict(value=2.0, vary=False, min=1.5, max=4),
+        alpha=dict(value=0.5, vary=False, min=0, max=1),
+        tstart=dict(value=40, vary=False, min=0, max=np.max(t)),
+        r0=dict(value=2.5, vary=False, min=1.5, max=4),
         w0=dict(value=0.5, vary=False, min=0.25, max=1.5),
         r1=dict(value=4.5, vary=False, min=2.1, max=7),
         w1=dict(value=0.25, vary=False, min=0.1, max=0.9),
@@ -316,6 +324,7 @@ def main(filename, ri, rf, numplots=-1):
     num = numplots
     # num = 24
     start = time.perf_counter()
+    print(f"Started at {start:.2f}")
 
     obj = lmfit.Minimizer(
         fit_fun,
@@ -443,18 +452,17 @@ def plot(filename):
     )
 
     f, a = plt.subplots()
-    a.plot(B, adjusted_spectra[:, adjusted_spectra.shape[1] // 2])
+    a.plot(B, adjusted_spectra[:, adjusted_spectra.shape[1] // 2], label="raw")
     a.plot(
         B,
         A
-        * simulate_matrix(params, interp_dists, single, t, r)[
-            :, adjusted_spectra.shape[1] // 2
-        ],
+        * simulate_matrix(params, interp_dists, single, t, r)[:, len(B) // 2],
+        label="fit",
     )
 
 
 if __name__ == "__main__":
-    filename = "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2024/1/31/406-537 WT/283.1 K 2/104mA_23.5kHz_pre30s_on5s_off235s_25000avgs_filtered_batchDecon.feather"
-    main(filename, ri=1.2, rf=8)
+    filename = "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2024/6/10/283.1 K/104mA_23.5kHz_pre30s_on15s_off415s_25000avgs_filtered_batchDecon.feather"
+    main(filename, ri=2, rf=5)
     plot(filename)
     plt.show()

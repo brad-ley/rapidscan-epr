@@ -350,7 +350,7 @@ def plotfits(filename, ontimes=(0, -1)):
         # label='N$_2$')
         ### LiPC ###
         ### LiPC ###
-        a.annotate("b)", (0, 1.26))
+        # a.annotate("b)", (0, 1.26))
         # a.annotate('N$_2$', (5, 1.19))
         # a.annotate('Air', (ontimes[1] + 5, 1.19))
         ### LiPC ###
@@ -377,8 +377,13 @@ def plotfits(filename, ontimes=(0, -1)):
         dpi=400,
         transparent=False,
     )
+    # axw.text(0.95, 0.875, "c)", transform=ax.transAxes)
+    # axw.annotate("d)", (0.15, 0.875), xycoords="axes fraction")
     figw.savefig(
         P(filename).parent.joinpath("LWfit.png"), dpi=1200, transparent=False
+    )
+    figw.savefig(
+        P(filename).parent.joinpath("LWfit.tif"), format="tif", dpi=1200
     )
     # plt.show()
 

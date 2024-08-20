@@ -71,7 +71,7 @@ def process(
     ts = np.insert(np.diff(times), 0, 0)
     ts = cumulative_trapezoid(ts)
     ts = np.insert(ts, 0, 0)
-    ti = ts[np.argmin(np.abs(ts - ontimes[0]))]
+    ti = ts[np.argmin(np.abs(ts - ontimes[0]))]  # times here
     tf = ts[np.argmin(np.abs(ts - ontimes[1]))]
 
     # for wrapping #
@@ -117,8 +117,10 @@ def process(
         B = B[l:h]
 
         loopdata = np.empty((len(B), len(cols) + 1))
+        dispdata = np.empty((len(B), len(cols) + 1))
         peakdata = np.empty((len(cols), 2))
         loopdata[:, 0] = B
+        dispdata[:, 0] = B
 
         fitdata = np.empty((len(B), len(cols) + 1))
         fitdata[:, 0] = B
@@ -221,6 +223,7 @@ def process(
                 )
 
             loopdata[:, i + 1] = R
+            dispdata[:, i + 1] = np.real(M)
             # try:
             #     loopdata[:, i+1] = np.real(R)[:len(B)]
             # except ValueError:
@@ -270,38 +273,98 @@ def process(
 
         c = 0
 
-        for i in range(1, len(loopdata[0, :]), int(len(loopdata[0, :]) / 7)):
-            # xx = np.copy(x) - (x[np.argmin(loopdata[:, i])] + x[np.argmax(loopdata[:, i])])/2
-            xx = x - x[np.argmax(loopdata[:, i])]
-            lim = 2.5
-            a.plot(
-                xx[np.abs(xx) < lim],
-                loopdata[:, i][np.abs(xx) < lim] + 1.2 * c,
-                c="k",
-            )
-            a.plot(
-                xx[np.abs(xx) < lim],
-                fitdata[:, i][np.abs(xx) < lim] + 1.2 * c,
-                c="r",
-                ls="--",
-            )
-            # a.plot(xx, loopdata[:, i] + c / 3, c='k')
-            c += 1
+        lim = 20
+        try:
+            for i in range(
+                1, len(loopdata[0, :]), int(len(loopdata[0, :]) / 7)
+            ):
+                # xx = np.copy(x) - (x[np.argmin(loopdata[:, i])] + x[np.argmax(loopdata[:, i])])/2
+                xx = x - x[np.argmax(loopdata[:, i])]
+                a.plot(
+                    xx[np.abs(xx) < lim],
+                    loopdata[:, i][np.abs(xx) < lim] + 0.05 * c,
+                    c="k",
+                )
+                # a.plot(
+                #     xx[np.abs(xx) < lim],
+                #     fitdata[:, i][np.abs(xx) < lim] + 0.05 * c,
+                #     c="r",
+                #     ls="--",
+                # )
+                # a.plot(xx, loopdata[:, i] + c / 3, c='k')
+                c += 1
+        except ValueError:
+            print("Not enough frames for a movie.")
         a.annotate(
             "",
             (-lim * 1.15, 8),
             xytext=(-lim * 1.15, 0),
             arrowprops={"arrowstyle": "-|>", "facecolor": "black"},
         )
-        a.annotate(r"$t=0\rightarrow120\,$s", (-lim * 1.4, 0.5), rotation=90)
-        a.annotate("a)", xy=(-lim * 1.5, 8.3), transform=a.transAxes)
+        a.annotate(r"$t=0\rightarrow410\,$s", (-lim * 1.4, 0.5), rotation=90)
+        # a.annotate("a)", xy=(-lim * 1.5, 8.3), transform=a.transAxes)
 
         a.set_ylabel("Signal (arb. u.)")
         a.set_xlabel("Field (G)")
         a.set_xlim(left=-1.6 * lim)
         # a.set_ylim(top=4.5)
 
-        # f.savefig('/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/Shared drives/Brad-Tonda UCSB/2022-Quasi-optical Sample Holder Solution for sub-THz Electron Spin Resonance Spectrometers/Figures/waterfall.png', dpi=1200)
+        f.savefig(P(filename).parent.joinpath("waterfall.png"), dpi=1200)
+        for i in [1, 2]:
+            fcomp, acomp = plt.subplots()
+            acomp.set_ylabel("Signal (arb. u.)")
+            acomp.set_xlabel("Field (G)")
+
+            # y0 = np.copy(loopdata[:, np.argmin(np.abs(ts - ontimes[0]))])
+            if i == 1:
+                ad = "abs"
+                st = "b)"
+                y0 = np.copy(loopdata[:, 2])
+                y1 = np.copy(loopdata[:, np.argmin(np.abs(ts - ontimes[1]))])
+                y0 -= np.mean(np.sort(y0[:16]))
+                y1 -= np.mean(np.sort(y1[:16]))
+                compx0 = (x - x[np.argmax(y0)] + 8.6265e3 * 1) / 1e3
+                compx1 = (x - x[np.argmax(y1)] + 8.6265e3 * 1) / 1e3
+            else:
+                ad = "disp"
+                st = "c)"
+                y0 = np.copy(dispdata[:, 2])
+                y1 = np.copy(dispdata[:, np.argmin(np.abs(ts - ontimes[1]))])
+            # print(ts[np.argmin(np.abs(ts - ontimes[1]))])
+            y0 /= np.max(np.abs(y0))
+            y1 /= np.max(np.abs(y1))
+            acomp.plot(
+                compx0,
+                y0,
+                c="k",
+                label=r"Laser off",
+            )
+            acomp.plot(
+                compx1,
+                y1,
+                c="#00A7CA",
+                ls="--",
+                label=r"Laser on",
+            )
+            acomp.legend(
+                loc="upper right",
+                markerfirst=False,
+                handlelength=1,
+                handletextpad=0.4,
+                labelspacing=0.2,
+            )
+
+            # acomp.text(0.1, 0.875, "b)", transform=ax.transAxes)
+            acomp.annotate(st, (0.05, 0.875), xycoords="axes fraction")
+            fcomp.savefig(
+                P(filename).parent.joinpath(ad + "_light_onoff_compared.png"),
+                dpi=1200,
+            )
+            fcomp.savefig(
+                P(filename).parent.joinpath(ad + "_light_onoff_compared.tif"),
+                format="tif",
+                dpi=1200,
+            )
 
         # ax.axvspan(x[0], x[n], facecolor='k', alpha=0.25)
 
@@ -346,7 +409,7 @@ def process(
                 fit.set_color(cmap(ts[i - 1] / np.max(ts)))
 
             # line.set_ydata(y - yy)
-            text.set_text(f"$t={ts[i-1]:.1f}$ s")
+            text.set_text(f"$t={ts[i - 1]:.1f}$ s")
             # SNRtext.set_text(f'${int(np.round(SNR, -1))}$')
 
             return line
@@ -456,7 +519,7 @@ if __name__ == "__main__":
             P(filename).parent.joinpath("animation.mp4"),
             dpi=300,
             progress_callback=lambda i, n: print(
-                f"Saving frame {i}/{n}", end="\r"
+                f"Saving frame {i + 1}/{n}", end="\r"
             ),
         )
     # ani.save(P(filename).parent.joinpath('animation.gif'),

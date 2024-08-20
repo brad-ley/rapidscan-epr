@@ -457,7 +457,7 @@ def decon(datajson, coil, amplitude, freq, bphase, harm, modfield):
         M = np.fft.fftshift(np.fft.fft(r * window, n=n))
         Phi = np.fft.fftshift(np.fft.fft(drive * window, n=n))
         f = np.fft.fftshift(np.fft.fftfreq(n, t[1] - t[0]))
-        B = -f * 2 * np.pi / GAMMA  # MISSING A NEGATIVE SOMEHOW. MAYBE HERE.
+        B = f * 2 * np.pi / GAMMA  # MISSING A NEGATIVE SOMEHOW. MAYBE HERE.
 
         # frac = 1 / 3
         frac = 1 / 2
@@ -739,7 +739,7 @@ app.layout = html.Div(
                             [
                                 dcc.Slider(
                                     50,
-                                    200,
+                                    400,
                                     id="amp",
                                     value=104,
                                     marks=None,
@@ -808,8 +808,10 @@ app.layout = html.Div(
                         html.Div(
                             [
                                 dcc.Slider(
-                                    -3 / 4 * np.pi,
-                                    -1 / 4 * np.pi,
+                                    # -3 / 4 * np.pi,
+                                    # -1 / 4 * np.pi,
+                                    0,
+                                    2 * np.pi,
                                     id="bphase",
                                     value=-1 / 2 * np.pi,
                                     marks=None,

@@ -36,6 +36,7 @@ def main(filename):
     popt, pcov = curve_fit(
         linfit, np.log10(data["avgs"]), np.log10(data["snr"])
     )
+    err = 2 * np.sqrt(np.diag(pcov))
     a.scatter(
         np.log10(data["avgs"]), np.log10(data["snr"]), c="k", label="Data"
     )
@@ -46,12 +47,15 @@ def main(filename):
         c="r",
         # alpha=0.5,
         label=rf"Fit: $m={{{popt[0]:.2f}}}$",
+        # \pm{{{err[0]:.2f}}}$",
     )
-    a.legend(frameon=False,
-             handletextpad=0.25,
-             handlelength=1,
-             labelspacing=0.25,
-             )
+    a.legend(
+        loc="upper left",
+        # markerfirst=False,
+        handlelength=1,
+        handletextpad=0.4,
+        labelspacing=0.2,
+    )
     # a.set_xscale("log")
     # a.set_yscale("log")
     a.set_ylabel(r"$Log_{10}$(SNR)")
