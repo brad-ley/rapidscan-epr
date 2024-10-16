@@ -1,16 +1,9 @@
-import ast
-import os
 from pathlib import Path as P
-from pathlib import PurePath as PP
-from dataclasses import dataclass
-from readDataFile import read
 from SVD import decompose
 
-import PIL
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import scipy
 
 from matplotlib import rc
 
@@ -42,8 +35,8 @@ def main():
     B = np.linspace(-25, 25, 1000)
     t = np.linspace(0, 500, 500)
     t1_light = 50
-    t2_light = 50
-    pct_change = 2
+    t2_light = t1_light
+    pct_change = 12
     g1 = 99 * np.ones(len(t)) - pct_change * np.heaviside(
         t - t1_light, 0.5
     ) * np.exp(-(t - t1_light) / 100)
@@ -55,6 +48,7 @@ def main():
     v = np.array(
         [l1 * g1[ii] / 100 + l2 * g2[ii] / 100 for ii, _ in enumerate(t)]
     ).T
+
     fig, ax = plt.subplots()
     ax.imshow(v, aspect="auto")
     pdv = pd.DataFrame(v)
@@ -62,26 +56,31 @@ def main():
     # ax.plot(v[len(B)//2, :])
 
     k = 2
-    PCAmat, V, E = decompose(v, t, k=k)
+    print(v.shape)
+    PCAmat, V, E, U = decompose(v, t, k=k)
     f, a = plt.subplots()
     # a.imshow(PCAmat, aspect='auto')
 
     for i in range(k):
         a.plot(
             B,
-            V[i, :] / V[i, np.argmax(np.abs(V[i, :]))] + i * 0.1,
+            U[:, i] / U[np.argmax(np.abs(U[:, i])), i] + i * 0.0,
             label=f"$C_{{{i+1}}}$",
         )
-    p = V[0, :] + V[1, :]
+    p = U[:, 0] + U[:, 1]
     p /= p[np.argmax(np.abs(p))]
     # a.plot(B, p, label='add first 2', ls=':')
+    diff = 1.295 * l1 - l2
     a.plot(
         B,
-        (l1 - l2) / (l1 - l2)[np.argmax(np.abs(l1 - l2))],
+        diff
+        / np.max(np.abs(diff))
+        # * np.sign(np.mean(diff))
+        * -1,
         ls="--",
         label="Diff",
     )
-    n = 2
+    # n = 2
     # a.plot(B[:-n], np.diff(V[0, :], n=n) / np.max(np.abs(np.diff(V[0, :], n=n)))
     #        * np.max(V[1, :]), label=f'$d/dt\,C_{{{1}}}$')
     a.legend()

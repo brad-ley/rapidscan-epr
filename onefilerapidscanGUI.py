@@ -17,7 +17,7 @@ from dash.exceptions import PreventUpdate
 from dash.long_callback import DiskcacheLongCallbackManager
 from plotly import graph_objects as go
 from plotly.offline import iplot
-from scipy.integrate import cumtrapz, trapz
+from scipy.integrate import cumulative_trapezoid, trapezoid
 from scipy.optimize import curve_fit as cf
 from scipy.signal import hilbert, sawtooth, windows, savgol_filter
 from scipy.special import jv

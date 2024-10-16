@@ -16,9 +16,9 @@ from typing import List, Tuple
 
 if __name__ == "__main__":
     plt.style.use(["science"])
-    rc("text.latex", preamble=r"\usepackage{cmbright}")
+    # rc("text.latex", preamble=r"\usepackage{cmbright}")
     rcParams = [
-        ["font.family", "sans-serif"],
+        ["font.family", "serif"],
         ["font.size", 14],
         ["axes.linewidth", 1],
         ["lines.linewidth", 2],
@@ -31,6 +31,7 @@ if __name__ == "__main__":
         ["ytick.minor.size", 2],
         ["ytick.minor.width", 1],
     ]
+    figsize = (6, 4)
     plt.rcParams.update(dict(rcParams))
 
 
@@ -189,19 +190,31 @@ class DataSet:
     def svd(self, k=None):
         U, E, Vh = np.linalg.svd(self.dat)
 
+        ratios = np.array(
+            [
+                E[idx] / E[idx + 1] if idx + 1 < len(E) else 0
+                for idx, _ in enumerate(E)
+            ]
+        )
+        lim = 1.5
         if not k:
-            ratios = np.array(
-                [
-                    E[idx] / E[idx + 1] if idx + 1 < len(E) else 0
-                    for idx, _ in enumerate(E)
-                ]
-            )
-            k = np.where(ratios < 1.5)[0][0]  # find first time it goes below 2
+            k = np.where(ratios < lim)[0][
+                0
+            ]  # find first time it goes below 1.5
 
         # if k == 0:
         if k < 2:
             k = 2
         self.k = k
+
+        self.fscree, self.ascree = plt.subplots()
+        max = 10
+        self.ascree.scatter(range(1, max + 1), ratios[:max], c="k")
+        self.ascree.set_yscale("log")
+        self.ascree.set_ylabel(r"$\sigma_{n}/\sigma_{n+1}$")
+        self.ascree.set_xlabel("Component number")
+        self.ascree.set_xticks(range(1, max, 5))
+        self.ascree.axhline(lim, alpha=0.5, ls="--", c="gray")
 
         self.U = U[:, :k]
         self.E = E[:k]
@@ -217,14 +230,14 @@ class DataSet:
         if subbasis:
             self.subbasis = True
             dat = self.subbasis_data
-            self.imshow_sim, self.a_sim = plt.subplots(figsize=(8, 6))
+            self.imshow_sim, self.a_sim = plt.subplots()
             a = self.a_sim
             self.a_sim.set_title(
                 f"PCA ($k = {self.k}$) sub-basis recreated data"
             )
         else:
             dat = self.dat
-            self.imshow_raw, self.a_raw = plt.subplots(figsize=(8, 6))
+            self.imshow_raw, self.a_raw = plt.subplots()
             a = self.a_raw
 
         if hasattr(self, "mean_centered"):
@@ -247,11 +260,20 @@ class DataSet:
 
     def plotLSVs(self):
         self.lsvf, self.lsva = plt.subplots(
-            nrows=self.Vh.shape[0], figsize=(8, 6), squeeze=False, sharex=True
+            nrows=self.Vh.shape[0],
+            figsize=figsize,
+            squeeze=False,
+            sharex=True,
+            layout="constrained",
         )
+        self.lsvf.text(0.01, 0.975, "a)", fontsize=20)
         for idx, u in enumerate(self.U[0, :]):
             (line,) = self.lsva[idx, 0].plot(
-                self.B, self.U[:, idx], label=f"$C_{{{idx + 1}}}$", alpha=0.5
+                self.B,
+                self.U[:, idx],
+                label=rf"$\mathbf{{u}}_{{{idx + 1}}}$",
+                alpha=0.5,
+                c="k",
             )
             find = 2
             if hasattr(self, "mean_centered"):
@@ -259,13 +281,17 @@ class DataSet:
             try:
                 if idx + 1 == find - 1:
                     popt, pcov = curve_fit(lorentzian, self.B, self.U[:, idx])
+                    err = 2 * np.sqrt(np.diag(pcov))
                     self.lsva[idx, 0].plot(
                         self.B,
                         lorentzian(self.B, *popt),
                         c=line.get_color(),
                         ls="--",
-                        label=rf"$\omega={popt[-1]:.1f}\,$G",
+                        label=rf"$\omega={popt[-1]:.2f}\,$G",
                     )
+                    print("single", popt, pcov)
+                    print("single", err)
+                    print("single", err[-1])
                 if idx + 1 == find:
                     # print(
                     #     "Data integrals: (raw, absolute value)",
@@ -319,6 +345,9 @@ class DataSet:
                     )
                     self.res = obj.minimize(method="leastsquares")
                     parvals = self.res.params.valuesdict()  # type: ignore
+                    print([(key, parvals[key]) for key in parvals])
+                    print(self.res.covar)
+                    print(2 * np.sqrt(np.diag(self.res.covar)))  # type: ignore
 
                     x0 = parvals["x0"]
                     a1 = parvals["a1"]
@@ -347,7 +376,12 @@ class DataSet:
                         double_lorentzian(self.res.params, self.B),  # type: ignore
                         c=line.get_color(),
                         ls="--",
-                        label=r"$F_{\omega_1} + F_{\omega_2}$",
+                        # label=rf"$\omega={popt[-1]:.2f}\,$G",
+                        label=r"$F_{\omega_1}+$"
+                        r"$F_{\omega_2}$"
+                        "\n"
+                        rf"(${w1:.2f}\,$G; "
+                        rf"${w2:.2f}\,$G)",
                     )
                     # self.lsva[idx, 0].plot(
                     #     self.B,
@@ -366,35 +400,51 @@ class DataSet:
 
             except RuntimeError:
                 print(f"Could not fit w_{idx + 1} component")
-            self.lsva[idx, 0].legend(
-                loc="upper right",
-                handlelength=0.75,
-                labelspacing=0.25,
-            )
+            if idx == 2:
+                self.lsva[idx, 0].legend(
+                    loc="upper right",
+                    handlelength=0.75,
+                    labelspacing=0.25,
+                )
+            else:
+                self.lsva[idx, 0].legend(
+                    loc="right",
+                    handlelength=0.75,
+                    labelspacing=0.25,
+                )
         self.lsvf.supxlabel("Field (G)")
         self.lsvf.supylabel("Intensity (arb. u)")
+        # self.lsvf.tight_layout()
         return self
 
     def plotRSVs(self):
         self.rsvf, self.rsva = plt.subplots(
-            nrows=self.Vh.shape[0], figsize=(8, 6), squeeze=False, sharex=True
+            nrows=self.Vh.shape[0],
+            figsize=figsize,
+            squeeze=False,
+            sharex=True,
+            layout="constrained",
         )
+        self.rsvf.text(0.01, 0.975, "b)", fontsize=20)
         find = 2
         if hasattr(self, "mean_centered"):
             find = 1
         for idx, v in enumerate(self.Vh[:, 0]):
             (line,) = self.rsva[idx, 0].plot(
                 self.times,
-                self.E[idx] * self.Vh[idx, :] + 0.0 * idx,
-                label=f"$w_{{{idx + 1}}}(t)$",
+                # self.E[idx] * self.Vh[idx, :] + 0.0 * idx,
+                np.sign(self.E[idx]) * self.Vh[idx, :] + 0.0 * idx,
+                label=rf"$\mathbf{{v}}_{{{idx + 1}}}(t)$",
                 alpha=0.5,
+                c="k",
             )
             try:
                 popt, pcov = curve_fit(
                     exp,
                     self.times[self.times > self.pre + self.on]
                     - (self.pre + self.on),
-                    self.E[idx]
+                    # self.E[idx]
+                    np.sign(self.E[idx])
                     * self.Vh[idx, :][self.times > self.pre + self.on],
                     p0=[
                         np.min(self.Vh[idx, :]),
@@ -407,21 +457,26 @@ class DataSet:
                     error_bar = "error"
                 else:
                     error_bar = f"{err[-1]:.1f}"
-                self.rsva[idx, 0].plot(
-                    self.times[self.times > self.pre + self.on],
-                    exp(
-                        self.times[self.times > self.pre + self.on]
-                        - (self.pre + self.on),
-                        *popt,
+
+                if err[-1] < 100:
+                    self.rsva[idx, 0].plot(
+                        self.times[self.times > self.pre + self.on],
+                        exp(
+                            self.times[self.times > self.pre + self.on]
+                            - (self.pre + self.on),
+                            *popt,
+                        )
+                        + 0.0 * idx,
+                        # label=rf"$\tau={popt[-1]:.1f}\pm${error_bar}$\,$s",
+                        label=rf"$\tau={popt[-1]:.1f}\,$s",
+                        c=line.get_color(),
+                        ls="--",
                     )
-                    + 0.0 * idx,
-                    label=rf"$\tau={popt[-1]:.1f}\pm${error_bar}$\,$s",
-                    c=line.get_color(),
-                    ls="--",
-                )
                 if idx + 1 == find:
                     self.popt = popt
                     self.err = err
+
+                print("tau", error_bar)
             except RuntimeError:
                 print(f"Could not fit w_{idx + 1} component")
             try:
@@ -434,9 +489,15 @@ class DataSet:
                 )
             except ValueError:
                 pass
-            self.rsva[idx, 0].legend()
+            self.rsva[idx, 0].legend(
+                loc="right",
+                handlelength=0.75,
+                labelspacing=0.25,
+            )
         self.rsvf.supxlabel("Time (s)")
-        self.rsvf.supylabel(r"Intensity (weighted by $\Sigma_i$)")
+        # self.rsvf.supylabel(r"Intensity (weighted by $\Sigma_i$)")
+        self.rsvf.supylabel(r"Intensity (arb. u)")
+        # self.rsvf.tight_layout()
         return self
 
     def saveResults(self):
@@ -465,6 +526,8 @@ class DataSet:
             self.imshow_raw.savefig(
                 path.joinpath(f"{add}imshow_raw.png"), dpi=1200
             )
+        if hasattr(self, "fscree"):
+            self.fscree.savefig(path.joinpath("scree.png"), dpi=1200)
 
         if hasattr(self, "res") or hasattr(self, "popt"):
             dt1 = pd.DataFrame(columns=["name", "value", "stderr"])  # type: ignore
@@ -606,6 +669,7 @@ class DataSet:
 
 
 def clean_input(folder):
+    print(folder)
     if P(folder).is_dir():
         fnames = []
         for fold in [fold for fold in P(folder).iterdir() if fold.is_dir()]:
@@ -643,8 +707,8 @@ def main(filename):
         # naive=True,
     )
     # DS.use_simulate_as_data()
-    DS.wrap(wrap_time=1064)
-    DS.mean_center()
+    # DS.wrap(wrap_time=1064)
+    # DS.mean_center()
     DS.svd()
     DS.plotSVs()
     DS.plotMatrix()
@@ -663,6 +727,6 @@ if __name__ == "__main__":
         try:
             main(fname)
         # except ValueError:
-        except RuntimeError:
+        except IndexError:
             print(f"ERROR with file: {fname}")
         plt.close()
