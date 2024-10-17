@@ -8,7 +8,7 @@ import numpy as np
 import PIL
 from matplotlib import rc
 from readDataFile import read
-from scipy.integrate import cumtrapz
+from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import curve_fit as cf
 from filterReal import isdigit
 
@@ -104,7 +104,7 @@ def plotfits(filename, ontimes=(0, -1)):
 
     tstep = np.mean(np.diff(times))
     ts = np.insert(np.diff(times), 0, 0)
-    ts = cumtrapz(ts)
+    ts = cumulative_trapezoid(ts)
     ts = np.insert(ts, 0, 0)
     fits = []
 

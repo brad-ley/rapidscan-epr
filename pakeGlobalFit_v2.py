@@ -3,6 +3,7 @@ from pathlib import Path as P
 # from readDataFile import read
 
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 import numpy as np
 import pandas as pd
 import lmfit
@@ -251,6 +252,10 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     _, intrinsic_data_centered = interpolate(
         intrinsic_data_centered, field, n=512
     )
+
+    intrinsic_data_centered /= np.max(intrinsic_data_centered)
+    broadened_data_centered /= np.max(broadened_data_centered)
+
     pake_field, pake_data = interpolate(pake_data, field, n=4192)
     pake_data = pake_data[:, :-1:]  # throw away the mT field col
     pake_data = pake_data[:, ::-1]
@@ -258,7 +263,7 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     # plt.show()
     # raise Exception
 
-    skip_times = 5
+    skip_times = 1
     tscale = 25e3 / 23.5e3
     t = np.linspace(
         0,
@@ -298,11 +303,15 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     figr, axr = plt.subplots()
     # broadened_data_centered -= np.min(broadened_data_centered)
     mapr = axr.imshow(
-        broadened_data_centered / np.max(broadened_data_centered),
+        broadened_data_centered,
+        # / np.max(broadened_data_centered - np.min(broadened_data_centered)),
         aspect="auto",
-        extent=[np.min(t), np.max(t), np.min(pake_field), np.max(pake_field)],  # type: ignore
+        extent=[np.min(t), np.max(t), np.max(pake_field), np.min(pake_field)],  # type: ignore
+        vmin=-0.05,
+        vmax=1.05,
     )
-    figr.colorbar(mapr, ax=axr, ticks=[0, 0.5, 1])
+    cbar = figr.colorbar(mapr, ax=axr, ticks=[0, 0.5, 1])
+    cbar.set_label("Amplitude (arb. u)", rotation=270, labelpad=15)
     axr.set_xlabel("Time (s)")
     axr.set_ylabel("Field (G)")
     figf, axf = plt.subplots()
@@ -310,31 +319,59 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
         res_params, pake_data, intrinsic_data_centered[:, 0], t, r
     )
     mapf = axf.imshow(
-        out / np.max(out),
+        out,  # / np.max(out),
         aspect="auto",
-        extent=[np.min(t), np.max(t), np.min(pake_field), np.max(pake_field)],  # type: ignore
+        extent=[np.min(t), np.max(t), np.max(pake_field), np.min(pake_field)],  # type: ignore
+        vmin=-0.05,
+        vmax=1.05,
     )
-    figf.colorbar(mapf, ax=axf, ticks=[0, 0.5, 1])
+    cbar = figf.colorbar(mapf, ax=axf, ticks=[0, 0.5, 1])
+    cbar.set_label("Amplitude (arb. u)", rotation=270, labelpad=15)
     axf.set_xlabel("Time (s)")
     axf.set_ylabel("Field (G)")
-    figr.savefig(P(broadened_file).parent.joinpath("raw_imshow.png"), dpi=600)
-    figf.savefig(P(broadened_file).parent.joinpath("fit_imshow.png"), dpi=600)
+    figr.savefig(
+        P(broadened_file).parent.joinpath("fits", "raw_imshow.png"), dpi=600
+    )
+    figf.savefig(
+        P(broadened_file).parent.joinpath("fits", "fit_imshow.png"), dpi=600
+    )
+
+    fig_res, ax_res = plt.subplots()
+    map_res = ax_res.imshow(
+        broadened_data_centered - out,
+        aspect="auto",
+        extent=[np.min(t), np.max(t), np.max(pake_field), np.min(pake_field)],  # type: ignore
+    )
+    ax_res.set_xlabel("Time (s)")
+    ax_res.set_ylabel("Field (G)")
+    cbar = fig_res.colorbar(
+        map_res,
+        ax=ax_res,
+    )
+    cbar.set_label("Amplitude (arb. u)", rotation=270, labelpad=15)
+
+    fig_res.savefig(
+        P(broadened_file).parent.joinpath("fits", "residue.png"), dpi=1200
+    )
 
     figl, axl = plt.subplots()
 
     # axl.plot(broadened_data_centered[:, broadened_data_centered.shape[1] // 2])
     axl.plot(
+        field_interp,
         intrinsic_data_centered[:, 0]
         / np.trapz(intrinsic_data_centered[:, 0]),
         label="SL",
     )
     axl.plot(
+        field_interp,
         broadened_data_centered[:, 0]
         / np.trapz(broadened_data_centered[:, 0]),
         label="DL",
     )
     axl.plot(
-        out[:, 0] / np.trapz(out[:, 0]),  # type:ignore
+        field_interp,
+        out[:, 0] / np.trapz(broadened_data_centered[:, 0]),
         label="DL fit",
     )
     # axl.plot(
@@ -352,8 +389,12 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
         handlelength=0.75,
         labelspacing=0.25,
     )
-    axl.set_yticks([0.000, 0.005, 0.010])
-    figl.savefig(P(broadened_file).parent.joinpath("slice.png"), dpi=1200)
+    axl.set_xlabel("Field (G)")
+    axl.set_ylabel("Amplitude (arb. u)")
+    # axl.set_yticks([0.000, 0.005, 0.010])
+    figl.savefig(
+        P(broadened_file).parent.joinpath("fits", "slice.png"), dpi=1200
+    )
     fig_unfolded, ax_unfolded = plt.subplots()
     figt, axt = plt.subplots()
     for ind, ti in enumerate(np.arange(0, np.max(t), np.max(t) // 15)):
@@ -375,11 +416,12 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     ax_unfolded.set_ylabel(r"$\%$ unfolded")
     ax_unfolded.set_xlabel("Time (s)")
     fig_unfolded.savefig(
-        P(broadened_file).parent.joinpath("unfolded_ratio.png"), dpi=600
+        P(broadened_file).parent.joinpath("fits", "unfolded_ratio.png"),
+        dpi=600,
     )
     axt.set_xlabel("Distance $r$ (nm)")
     axt.set_ylabel("$P(r)$")
-    axt.set_yticks([])
+    axt.set_yticklabels([])
     axt.annotate(
         "Time",
         xy=(6.5, -0.295),
@@ -394,7 +436,7 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     )
     # axt.annotate("Time", (6, -1 * np.max(t) // 15 * 0.2), (6, 0))
     figt.savefig(
-        P(broadened_file).parent.joinpath("gaussian_fits.png"), dpi=600
+        P(broadened_file).parent.joinpath("fits", "gaussian_fits.png"), dpi=600
     )
 
     figtau, axtau = plt.subplots()
@@ -405,7 +447,7 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     axtau.set_xlabel("Time (s)")
     axtau.set_ylabel("Peak height (au)")
     figtau.savefig(
-        P(broadened_file).parent.joinpath("peak_heights.png"), dpi=600
+        P(broadened_file).parent.joinpath("fits", "peak_heights.png"), dpi=600
     )
     # axt.legend()
 
@@ -422,7 +464,7 @@ if __name__ == "__main__":
         "Data/2024/7/30/282.8 K/102mA_23.5kHz_pre30s_on10s_off410s_25000avgs_filtered_batchDecon.feather"
     )
     pake_patterns = P(basepath).joinpath(
-        "Code/dipolar averaging/tumbling_pake_1-2_7-2_unlike_morebaseline_6ns_tcorr.txt"
+        "Code/dipolar averaging/tumbling_pake_1-2_7-2_unlike_morebaseline_11ns_tcorr.txt"
     )
     main(broadened_f, intrinsic_f, pake_patterns, newfit=True)
     plt.show()

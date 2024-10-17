@@ -523,6 +523,7 @@ def decon(datajson, coil, amplitude, freq, bphase, harm, modfield):
     Output("timerange", "max"),
     Output("skiprows", "data"),
     Output("averages", "value"),
+    Output("filepath", "value"),
     Input("filepath", "value"),
     prevent_initial_call=False,
 )
@@ -533,6 +534,7 @@ def parse_contents(filepath):
     tmin = dash.no_update
     tmax = dash.no_update
     skiprows = dash.no_update
+    filepath = filepath.strip("'")
     try:
         # if True:
         skiprows = 0
@@ -665,7 +667,16 @@ def parse_contents(filepath):
         avgs = dash.no_update
 
     # here
-    return h, fig, firstrun.to_json(orient="split"), tmin, tmax, skiprows, avgs
+    return (
+        h,
+        fig,
+        firstrun.to_json(orient="split"),
+        tmin,
+        tmax,
+        skiprows,
+        avgs,
+        filepath,
+    )
 
 
 app.layout = html.Div(
