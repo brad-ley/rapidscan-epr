@@ -3,7 +3,7 @@
 `pip install -r requirements.txt` to install necessary python packages
 
 For a typical RS TiGGER experiment:
-1. Data is acquired with LabVIEW vis on control PC (each experiment should be given its own folder as the data processing produces a lot of additional files that are sorted into the parent folder)
+1. Data is acquired with LabVIEW vis on control PC (each experiment should be given its own folder as the data processing produces a lot of additional files that are sorted into the parent folder; it is good in the file names to include the modulation coil current and frequency -- usual naming would go `./<experiment>/<temp>/<current>mA_<freq>kHz.dat` )
 2. Run `onefileRapidscanGUI.py` on the computer with the data file (run with Python, open using IP address output by Python)
 3. Open file in vi using the full pathname (app will strip ' ' from each side of the string if they are present)
 4. Adjust experimental settings to match experiment and coil
