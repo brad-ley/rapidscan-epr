@@ -5,7 +5,7 @@
 For a typical RS TiGGER experiment:
 1. Data is acquired with LabVIEW vis on control PC (each experiment should be given its own folder as the data processing produces a lot of additional files that are sorted into the parent folder)
 2. Run `onefileRapidscanGUI.py` on the computer with the data file (run with Python, open using IP address output by Python)
-3. Open file in vi using the full pathname (app will strip "'" from each side of the string if they are present)
+3. Open file in vi using the full pathname (app will strip ' ' from each side of the string if they are present)
 4. Adjust experimental settings to match experiment and coil
 5. Auto-phase signal (if this doesn't work, try manual phasing to match what is expected for given EPR spectrum)
 6. `Batch deconvolve` to apply same deconvolution process to all time points in the file (this will also generate a times.txt file that uses the number of averages from the TiGGER file name to calculate the amount of time that has passed during the experiment)
