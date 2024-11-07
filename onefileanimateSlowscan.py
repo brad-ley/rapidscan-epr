@@ -75,11 +75,12 @@ def process(
     tf = ts[np.argmin(np.abs(ts - ontimes[1]))]
 
     # for wrapping #
-    try:
-        idx = np.where(ts > 1066)[0][0]
-        cols = np.roll(np.array(cols), len(cols) - idx)
-    except IndexError:
-        pass
+    # try:
+    #     idx = np.where(ts > 1066)[0][0]
+    #     # idx = np.where(ts > 130)[0][0]
+    #     cols = np.roll(np.array(cols), len(cols) - idx)
+    # except IndexError:
+    #     pass
 
     cmap = plt.get_cmap("cool")
     norm = mpl.colors.Normalize(vmin=0, vmax=len(cols) * tstep)
@@ -355,7 +356,7 @@ def process(
             )
 
             # acomp.text(0.1, 0.875, "b)", transform=ax.transAxes)
-            acomp.annotate(st, (0.05, 0.875), xycoords="axes fraction")
+            # acomp.annotate(st, (0.05, 0.875), xycoords="axes fraction")
             fcomp.savefig(
                 P(filename).parent.joinpath(ad + "_light_onoff_compared.png"),
                 dpi=1200,

@@ -716,6 +716,7 @@ app.layout = html.Div(
                                 dcc.Slider(
                                     0.20,
                                     2.0,
+                                    step=0.01,
                                     id="coil",
                                     value=0.75,
                                     marks=None,
@@ -750,7 +751,8 @@ app.layout = html.Div(
                             [
                                 dcc.Slider(
                                     50,
-                                    400,
+                                    200,
+                                    step=0.5,
                                     id="amp",
                                     value=104,
                                     marks=None,
@@ -784,8 +786,9 @@ app.layout = html.Div(
                         html.Div(
                             [
                                 dcc.Slider(
-                                    15,
-                                    70,
+                                    20,
+                                    30,
+                                    step=0.05,
                                     id="freq",
                                     value=23.5,
                                     marks=None,
