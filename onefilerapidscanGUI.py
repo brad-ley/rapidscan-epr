@@ -826,6 +826,7 @@ app.layout = html.Div(
                                     # -1 / 4 * np.pi,
                                     0,
                                     2 * np.pi,
+                                    step=0.01,
                                     id="bphase",
                                     value=-1 / 2 * np.pi,
                                     marks=None,
