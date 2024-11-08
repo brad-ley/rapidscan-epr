@@ -615,7 +615,10 @@ def parse_contents(filepath):
         fig.update_layout({"uirevision": "foo"}, overwrite=True)
         fig.update_layout(margin=margin)
 
-        h = html.Div(f"Loaded {P(filepath).name}", style={"color": "green"})
+        h = html.Div(
+            f"Loaded {P(filepath).name}, ({P(filepath).parent.name})",
+            style={"color": "green"},
+        )
         firstrun["time"] = dat["time"]
         # firstrun[0] = dat[dat.columns[int(len(dat.columns)/2)]]
         # print(dat.loc[:, dat.columns != 'time'])
