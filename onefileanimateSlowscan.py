@@ -143,29 +143,28 @@ def process(
             #     np.trapz(np.imag(np.exp(-1j * ang) * M))
             #     for ang in np.linspace(0, np.pi, nang)
             # ]
-            abss = [
-                np.abs(
-                    np.mean(np.real(np.exp(-1j * ang) * M)[:n])
-                    - np.mean(np.real(np.exp(-1j * ang) * M)[-n:])
-                )
-                for ang in np.linspace(0, np.pi, nang)
-            ]
+            if phase:
+                abss = [
+                    np.abs(
+                        np.mean(np.real(np.exp(-1j * ang) * M)[:n])
+                        - np.mean(np.real(np.exp(-1j * ang) * M)[-n:])
+                    )
+                    for ang in np.linspace(0, np.pi, nang)
+                ]
+                M = M * np.exp(-1j * angs[np.argmin(abss)])
 
             ### for phasing LiPC ###
-            # m = np.array([np.imag(np.exp(-1j * ang) * M) for ang in angs])
-            # add = 0
-
-            # if m.shape[-1] % 2 != 0:
-            #     add = 1
-            # abss = [np.trapz(np.abs(m[:n] - m[-n:]))]
+            else:
+                pass
+                # m = np.array([np.imag(np.exp(-1j * ang) * M) for ang in angs])
+                # abss = [np.trapz(np.abs(m[:n] - m[-n:]))]
 
             # left = m[:, :m.shape[-1]//2]
             # right = m[:, ::-1][:, :m.shape[-1]//2]
             # symm = np.trapz((right - left)**2, axis=1)
 
             ### LiPC ###
-
-            M = M * np.exp(-1j * angs[np.argmin(abss)])
+            # M = M * np.exp(-1j * angs[np.argmin(abss)])
             ### LiPC ###
 
             # if np.mean(np.imag(M)) < np.mean(np.imag(M[:32])):
@@ -177,8 +176,10 @@ def process(
             if np.mean(np.imag(M)) < np.mean(np.imag(M)[:n]):
                 M = M * np.exp(-1j * np.pi)
             ### for phasing LiPC ###
-            # R = np.imag(M)
-            R = -np.real(M)
+            if phase:
+                R = -np.real(M)
+            else:
+                R = np.imag(M)
 
             peakdata[i, 1] = np.max(R)
             # SNR[i] = np.max(np.abs(R)) / np.std(np.abs(R[:n]))
@@ -454,6 +455,12 @@ if __name__ == "__main__":
     except IndexError:
         pf = 0
     plotfields = pf + 30 * np.array([-1, 1])
+
+    try:
+        phase = bool(sys.argv[3])
+    except IndexError:
+        phase = False
+
     try:
         on = float(
             "".join(
