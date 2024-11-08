@@ -453,6 +453,7 @@ def decon(datajson, coil, amplitude, freq, bphase, harm, modfield):
         n = 1 * len(r)
         # window = np.ones(len(r))
         window = windows.blackman(len(r))
+        # window = windows.gaussian(len(r), std=len(r) / 10)
 
         M = np.fft.fftshift(np.fft.fft(r * window, n=n))
         Phi = np.fft.fftshift(np.fft.fft(drive * window, n=n))

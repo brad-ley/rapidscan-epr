@@ -143,20 +143,21 @@ def process(
             #     np.trapz(np.imag(np.exp(-1j * ang) * M))
             #     for ang in np.linspace(0, np.pi, nang)
             # ]
-            # abss = [
-            #     np.abs(
-            #         np.mean(np.real(np.exp(-1j * ang) * M)[:n]) -
-            #         np.mean(np.real(np.exp(-1j * ang) * M)[-n:]))
-            #     for ang in np.linspace(0, np.pi, nang)
-            # ]
+            abss = [
+                np.abs(
+                    np.mean(np.real(np.exp(-1j * ang) * M)[:n])
+                    - np.mean(np.real(np.exp(-1j * ang) * M)[-n:])
+                )
+                for ang in np.linspace(0, np.pi, nang)
+            ]
 
             ### for phasing LiPC ###
-            m = np.array([np.imag(np.exp(-1j * ang) * M) for ang in angs])
-            add = 0
+            # m = np.array([np.imag(np.exp(-1j * ang) * M) for ang in angs])
+            # add = 0
 
-            if m.shape[-1] % 2 != 0:
-                add = 1
-            abss = [np.trapz(np.abs(m[:n] - m[-n:]))]
+            # if m.shape[-1] % 2 != 0:
+            #     add = 1
+            # abss = [np.trapz(np.abs(m[:n] - m[-n:]))]
 
             # left = m[:, :m.shape[-1]//2]
             # right = m[:, ::-1][:, :m.shape[-1]//2]
@@ -176,7 +177,8 @@ def process(
             if np.mean(np.imag(M)) < np.mean(np.imag(M)[:n]):
                 M = M * np.exp(-1j * np.pi)
             ### for phasing LiPC ###
-            R = np.imag(M)
+            # R = np.imag(M)
+            R = -np.real(M)
 
             peakdata[i, 1] = np.max(R)
             # SNR[i] = np.max(np.abs(R)) / np.std(np.abs(R[:n]))
