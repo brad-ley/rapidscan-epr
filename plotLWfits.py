@@ -1,15 +1,9 @@
-import ast
-import os
 from pathlib import Path as P
 from pathlib import PurePath as PP
-from dataclasses import dataclass
-from readDataFile import read
 from scipy.optimize import curve_fit
 
-import PIL
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 
 from matplotlib import rc
 
@@ -87,14 +81,13 @@ def main(filename):
     # a.errorbar(invT, k, yerr=errs, color='k', fmt='o', label='Data')
     fitx = np.linspace(np.min(invT), np.max(invT), 1000)
     popt, pcov = curve_fit(lin, invT, k)
-    print(popt[0] * -1.987 / 1e3, 2*np.sqrt(np.diag(pcov)[0]) * 1.987 / 1e3)
+    print(popt[0] * -1.987 / 1e3, 2 * np.sqrt(np.diag(pcov)[0]) * 1.987 / 1e3)
     a.plot(fitx, lin(fitx, *popt), ls='--', c='r', label=rf'$E_a={{{-1.987*popt[0]/1e3:.1f}}}$ kcal/mol')
     a.legend(
-         handletextpad=0.25,
-         handlelength=1,
-         labelspacing=0.25,
-        )
-
+        handletextpad=0.25,
+        handlelength=1,
+        labelspacing=0.25,
+    )
 
     # color = 'tab:blue'
     # ax2 = ax.twinx()

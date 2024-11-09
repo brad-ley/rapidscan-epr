@@ -181,6 +181,9 @@ def process(
             else:
                 R = np.imag(M)
 
+            if np.mean(R) < np.mean(R[:8]):
+                R *= -1
+
             peakdata[i, 1] = np.max(R)
             # SNR[i] = np.max(np.abs(R)) / np.std(np.abs(R[:n]))
             try:
