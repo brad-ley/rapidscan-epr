@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 import PIL
 from matplotlib import rc
-from readDataFile import read
 from scipy.optimize import curve_fit
 import pyarrow.feather as feather
 

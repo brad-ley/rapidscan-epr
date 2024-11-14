@@ -1,6 +1,5 @@
 import ast
 from pathlib import Path as P
-# from readDataFile import read
 
 import matplotlib.pyplot as plt
 import matplotlib as mpl

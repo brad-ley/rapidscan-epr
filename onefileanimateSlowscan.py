@@ -13,7 +13,6 @@ import PIL
 import pyarrow.feather as feather
 from matplotlib import rc
 from matplotlib.animation import FuncAnimation, PillowWriter
-from readDataFile import read
 from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import curve_fit as cf
 from scipy.interpolate import interp1d

@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import PIL
 from matplotlib import rc
-from readDataFile import read
 from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import curve_fit as cf
 from filterReal import isdigit

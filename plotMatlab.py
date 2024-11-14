@@ -2,7 +2,6 @@ import ast
 import os
 from pathlib import Path as P
 from pathlib import PurePath as PP
-from readDataFile import read
 from scipy.optimize import curve_fit
 from scipy.integrate import cumtrapz
 from math import ceil

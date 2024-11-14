@@ -6,7 +6,6 @@ from pathlib import PurePath as PP
 import matplotlib.pyplot as plt
 import numpy as np
 import PIL
-from readDataFile import read
 from scipy.integrate import solve_ivp
 
 

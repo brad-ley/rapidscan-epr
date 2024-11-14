@@ -3,7 +3,6 @@ import os
 from pathlib import Path as P
 from pathlib import PurePath as PP
 from dataclasses import dataclass
-from readDataFile import read
 from scipy.optimize import curve_fit
 from deconvolveRapidscan import lorentzian
 
