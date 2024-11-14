@@ -3,7 +3,6 @@ import os
 from pathlib import Path as P
 from pathlib import PurePath as PP
 from scipy.signal import savgol_filter
-from statusBar import statusBar
 
 import PIL
 import matplotlib.pyplot as plt

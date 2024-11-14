@@ -21,9 +21,7 @@ from scipy.integrate import cumulative_trapezoid, trapezoid
 from scipy.optimize import curve_fit as cf
 from scipy.signal import hilbert, sawtooth, windows, savgol_filter
 from scipy.special import jv
-from filterReal import isdigit
 
-from cycle import cycle
 from deconvolveRapidscan import GAMMA, sindrive
 from simulateRapidscan import Bloch
 
