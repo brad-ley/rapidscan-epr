@@ -21,6 +21,7 @@ from scipy.integrate import cumulative_trapezoid, trapezoid
 from scipy.optimize import curve_fit as cf
 from scipy.signal import hilbert, sawtooth, windows, savgol_filter
 from scipy.special import jv
+from filterReal import isdigit
 
 from deconvolveRapidscan import GAMMA, sindrive
 from simulateRapidscan import Bloch
@@ -533,7 +534,7 @@ def parse_contents(filepath):
     tmin = dash.no_update
     tmax = dash.no_update
     skiprows = dash.no_update
-    filepath = filepath.strip("'")
+    filepath = filepath.strip("'").strip('"')
     try:
         # if True:
         skiprows = 0
