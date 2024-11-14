@@ -17,7 +17,6 @@ from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import curve_fit as cf
 from scipy.interpolate import interp1d
 from scipy.signal import hilbert
-from statusBar import statusBar
 
 from deconvolveRapidscan import gaussian, lorentzian
 from filterReal import isdigit
