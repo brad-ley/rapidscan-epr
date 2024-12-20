@@ -395,15 +395,34 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
         P(broadened_file).parent.joinpath("fits", "slice.png"), dpi=1200
     )
     fig_unfolded, ax_unfolded = plt.subplots()
-    figt, axt = plt.subplots()
-    for ind, ti in enumerate(np.arange(0, np.max(t), np.max(t) // 15)):
+    figt, axt = plt.subplots(figsize=(3, 4))
+    N = 8
+    M = 0.015
+    # cmap = plt.get_cmap("winter")
+    cmap = plt.get_cmap("viridis")
+    norm = mpl.colors.Normalize(vmin=0, vmax=np.max(t))  # type: ignore
+    cbar = plt.colorbar(mappable=mpl.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axt)  # type: ignore
+    cbar.ax.set_ylabel("Elapsed time (s)")
+    for ind, ti in enumerate(np.arange(0, np.max(t), np.max(t) // N)):
         axt.plot(
             r,
-            double_gaussian(r, res_params, ti) - ind * 0.02,
+            double_gaussian(r, res_params, ti) + ind * M,
             label=f"{ti:.1f}s",
-            c="black",
-            alpha=(0.5 * np.max(ti) + ti) / (1.5 * np.max(t)),
+            # c="black",
+            c=cmap((ind - 1) / N),
+            # alpha=(0.5 * np.max(ti) + ti) / (1.5 * np.max(t)),
         )
+        axt.fill_between(
+            r,
+            double_gaussian(r, res_params, ti) + ind * M,
+            ind * M,
+            # label=f"{ti:.1f}s",
+            # c="black",
+            facecolor=cmap((ind - 1) / N),
+            alpha=0.25,
+
+        )
+
     ax_unfolded.plot(
         t,
         100
@@ -421,18 +440,20 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     axt.set_xlabel("Distance $r$ (nm)")
     axt.set_ylabel("$P(r)$")
     axt.set_yticklabels([])
-    axt.annotate(
-        "Time",
-        xy=(6.5, -0.295),
-        xycoords="data",
-        xytext=(6.5, 0.0),
-        textcoords="data",
-        arrowprops=dict(
-            arrowstyle="-|>",
-            color="k",
-        ),
-        ha="center",
-    )
+    # axt.annotate(
+    #     "Time",
+    #     xy=(6.5, (N + 1) * O),
+    #     xycoords="data",
+    #     xytext=(6.5, O / 2),
+    #     textcoords="data",
+    #     arrowprops=dict(
+    #         arrowstyle="--|>",
+    #         color="k",
+    #         alpha=0.5,
+    #         lw=2,
+    #     ),
+    #     ha="center",
+    # )
     # axt.annotate("Time", (6, -1 * np.max(t) // 15 * 0.2), (6, 0))
     figt.savefig(
         P(broadened_file).parent.joinpath("fits", "gaussian_fits.png"), dpi=600
@@ -456,14 +477,20 @@ if __name__ == "__main__":
     #     "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2024/6/10/283.1 K/104mA_23.5kHz_pre30s_on15s_off415s_25000avgs_filtered_batchDecon.feather"
     # )
     basepath = "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/"
+    # broadened_f = P(basepath).joinpath(
+    #     "Data/2024/6/13/Buffer/283.2 K/106mA_23.5kHz_pre30s_on15s_off415s_25000avgs_filtered_batchDecon.feather"
+    # )
     broadened_f = P(basepath).joinpath(
-        "Data/2024/6/13/Buffer/283.2 K/106mA_23.5kHz_pre30s_on15s_off415s_25000avgs_filtered_batchDecon.feather"
+        "Data/2024/6/13/Buffer/283.2 K copy/106mA_23.5kHz_pre30s_on15s_off415s_25000avgs_filtered_batchDecon.feather"
     )
+    # intrinsic_f = P(basepath).joinpath(
+    #     "Data/2024/7/30/282.8 K/102mA_23.5kHz_pre30s_on10s_off410s_25000avgs_filtered_batchDecon.feather"
+    # )
     intrinsic_f = P(basepath).joinpath(
-        "Data/2024/7/30/282.8 K/102mA_23.5kHz_pre30s_on10s_off410s_25000avgs_filtered_batchDecon.feather"
+        "Data/2024/6/26/SL/283.0 K/106mA_23.5kHz_pre30s_on15s_off405s_25000avgs_filtered_batchDecon.feather"
     )
     pake_patterns = P(basepath).joinpath(
         "Code/dipolar averaging/tumbling_pake_1-2_7-2_unlike_morebaseline_11ns_tcorr.txt"
     )
     main(broadened_f, intrinsic_f, pake_patterns, newfit=True)
-    plt.show()
+    # plt.show()
