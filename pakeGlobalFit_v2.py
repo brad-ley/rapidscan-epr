@@ -1,4 +1,5 @@
 import ast
+import sys
 from pathlib import Path as P
 
 import matplotlib.pyplot as plt
@@ -7,6 +8,7 @@ import numpy as np
 import pandas as pd
 import lmfit
 import time
+from matplotlib.colors import LogNorm
 
 if __name__ == "__main__":
     plt.style.use(["science"])
@@ -81,6 +83,7 @@ def interpolate(dataframe, newx, n=2048) -> tuple[np.ndarray, np.ndarray]:
     return newx, out.to_numpy()
 
 
+# def alpha_heaviside_tau(beta, alpha, ti, tstart, tau):
 def alpha_heaviside_tau(alpha, ti, tstart, tau):
     return (
         alpha * np.heaviside(ti - tstart, 0.5) * np.exp(-(ti - tstart) / tau)
@@ -96,17 +99,19 @@ def double_gaussian(x, params, ti):
     w1 = params["w1"]
     A = params["A"]
     tau = params["tau"]
+    # beta = params["beta"]
     alpha = params["alpha"]
     tstart = params["tstart"]
     # n = params["shift"]
 
-    alpha = alpha_heaviside_tau(alpha, ti, tstart, tau)
+    # alpha_func = alpha_heaviside_tau(beta, alpha, ti, tstart, tau)
+    alpha_func = alpha_heaviside_tau(alpha, ti, tstart, tau)
 
     return A * (
-        (1 - alpha)
+        (1 - alpha_func)
         / np.sqrt(2 * np.pi * w0**2)
         * np.exp(-((x - x0) ** 2) / (2 * w0**2))
-        + alpha
+        + alpha_func
         * (
             1
             / np.sqrt(2 * np.pi * w1**2)
@@ -116,8 +121,19 @@ def double_gaussian(x, params, ti):
 
 
 def fit_function(params, broadened_data, pake_data, intrinsic_lineshape, t, r):
-    resid = broadened_data - simulate_matrix(
-        params, pake_data, intrinsic_lineshape, t, r
+    # print(
+    #     broadened_data.shape,
+    #     broadened_data[:, t > params["tstart"]].shape,
+    #     t,
+    #     t > params["tstart"],
+    # )
+    resid = (
+        # broadened_data[:, t > params["tstart"]]
+        # - simulate_matrix(params, pake_data, intrinsic_lineshape, t, r)[
+        #     :, t > params["tstart"]
+        # ]
+        broadened_data
+        - simulate_matrix(params, pake_data, intrinsic_lineshape, t, r)
     )
     return resid.flatten()
 
@@ -167,18 +183,23 @@ def do_fitting(
     broadened_data_centered, pake_data, intrinsic_data_centered, t, r
 ) -> dict[str, float]:
     params = lmfit.create_params(
-        A=dict(value=0.01, vary=True, min=0, max=0.3),
+        A=dict(value=0.025, vary=True, min=0, max=0.5),
         tau=dict(
-            value=np.max(t) / 2,
+            value=np.max(t) / 4,
             vary=True,
             min=np.max(t) / 10,
-            max=np.max(t) / 2,
+            max=np.max(t) / 1.5,
         ),
+        # beta=dict(value=0.0, vary=False, min=0, max=0.1),
+        # alpha_plus_beta=dict(value=0.9, vary=True, min=0, max=1),
+        # alpha=dict(
+        #     expr="alpha_plus_beta-beta if alpha_plus_beta-beta > 0 else 0."
+        # ),
         alpha=dict(value=0.5, vary=True, min=0, max=1),
-        tstart=dict(value=35, vary=False, min=0, max=np.max(t)),
-        r0=dict(value=2.9, vary=True, min=2.0, max=3.5),
-        w0=dict(value=0.4, vary=False, min=0.2, max=1.5),
-        r1=dict(value=4.5, vary=True, min=3.5, max=6.5),
+        tstart=dict(value=45, vary=False, min=30, max=45),
+        r0=dict(value=3.2, vary=True, min=2.0, max=6.5),
+        w0=dict(value=0.4, vary=False, min=0.2, max=4.5),
+        r1=dict(value=4.5, vary=True, min=2.0, max=6.5),
         w1=dict(value=0.8, vary=False, min=0.1, max=0.9),
         shift=dict(value=-0.005, vary=True, min=-0.1, max=0.1),
     )
@@ -196,9 +217,10 @@ def do_fitting(
             t,
             r,
         ),
+        iter_cb=per_iter,
     )
+    res = obj.minimize(method="least_squares")
     res = obj.minimize(method="leastsq")
-    # res = obj.minimize(method="brute")
 
     end = time.perf_counter()
     print(f"Elapsed (after compilation) = {end - start:.2f} s")
@@ -255,9 +277,9 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     intrinsic_data_centered /= np.max(intrinsic_data_centered)
     broadened_data_centered /= np.max(broadened_data_centered)
 
-    pake_field, pake_data = interpolate(pake_data, field, n=4192)
+    pake_field, pake_data = interpolate(pake_data, field, n=2048)
     pake_data = pake_data[:, :-1:]  # throw away the mT field col
-    pake_data = pake_data[:, ::-1]
+    pake_data = pake_data[:, ::-1]  # reverse order
     # plt.imshow(pake_data, aspect="auto", norm=LogNorm(vmin=1e-4, vmax=1))
     # plt.show()
     # raise Exception
@@ -328,6 +350,9 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     cbar.set_label("Amplitude (arb. u)", rotation=270, labelpad=15)
     axf.set_xlabel("Time (s)")
     axf.set_ylabel("Field (G)")
+    if not P(broadened_file).parent.joinpath("fits").exists():
+        P(broadened_file).parent.joinpath("fits").mkdir()
+
     figr.savefig(
         P(broadened_file).parent.joinpath("fits", "raw_imshow.png"), dpi=600
     )
@@ -397,11 +422,14 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     fig_unfolded, ax_unfolded = plt.subplots()
     figt, axt = plt.subplots(figsize=(3, 4))
     N = 8
-    M = 0.015
+    M = np.max(double_gaussian(r, res_params, t[0])) * 0.75
     # cmap = plt.get_cmap("winter")
     cmap = plt.get_cmap("viridis")
     norm = mpl.colors.Normalize(vmin=0, vmax=np.max(t))  # type: ignore
-    cbar = plt.colorbar(mappable=mpl.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axt)  # type: ignore
+    cbar = plt.colorbar(
+        mappable=mpl.cm.ScalarMappable(norm=norm, cmap=cmap),
+        ax=axt,  # type: ignore
+    )  # type: ignore
     cbar.ax.set_ylabel("Elapsed time (s)")
     for ind, ti in enumerate(np.arange(0, np.max(t), np.max(t) // N)):
         axt.plot(
@@ -411,6 +439,7 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
             # c="black",
             c=cmap((ind - 1) / N),
             # alpha=(0.5 * np.max(ti) + ti) / (1.5 * np.max(t)),
+            zorder=2 * (N - ind) + 1,
         )
         axt.fill_between(
             r,
@@ -419,19 +448,24 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
             # label=f"{ti:.1f}s",
             # c="black",
             facecolor=cmap((ind - 1) / N),
-            alpha=0.25,
-
+            alpha=0.5,
+            zorder=2 * (N - ind),
         )
 
     ax_unfolded.plot(
         t,
         100
         * alpha_heaviside_tau(
-            res_params["alpha"], t, res_params["tstart"], res_params["tau"]
+            # res_params["beta"],
+            res_params["alpha"],
+            t,
+            res_params["tstart"],
+            res_params["tau"],
         ),
         c="black",
     )
     ax_unfolded.set_ylabel(r"$\%$ unfolded")
+    ax_unfolded.set_ylim([-5, 105])  # type: ignore
     ax_unfolded.set_xlabel("Time (s)")
     fig_unfolded.savefig(
         P(broadened_file).parent.joinpath("fits", "unfolded_ratio.png"),
@@ -462,14 +496,36 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     figtau, axtau = plt.subplots()
     axtau.plot(t, out[out.shape[0] // 2, :])
     axtau.plot(
-        broadened_data_centered[broadened_data_centered.shape[0] // 2, :]
+        t, broadened_data_centered[broadened_data_centered.shape[0] // 2, :]
     )
     axtau.set_xlabel("Time (s)")
     axtau.set_ylabel("Peak height (au)")
     figtau.savefig(
         P(broadened_file).parent.joinpath("fits", "peak_heights.png"), dpi=600
     )
+
     # axt.legend()
+
+
+def per_iter(params, iter, resid, *args, **kwargs):
+    # if iter % 10 == 0:
+    if True:
+        print(
+            f"Iter {iter:<4} --> ",
+            [
+                f"{p.name}={p.value:.4f}"
+                for p in params.values()
+                if p.name
+                not in [
+                    "beta",
+                    "alpha_plus_beta",
+                    "tstart",
+                    "w1",
+                    "w0",
+                    "shift",
+                ]
+            ],
+        )
 
 
 if __name__ == "__main__":
@@ -478,11 +534,14 @@ if __name__ == "__main__":
     # )
     basepath = "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/"
     # broadened_f = P(basepath).joinpath(
-    #     "Data/2024/6/13/Buffer/283.2 K/106mA_23.5kHz_pre30s_on15s_off415s_25000avgs_filtered_batchDecon.feather"
+    #     "Data/2024/6/12/Ficoll 70/283.4 K/104mA_23.5kHz_pre30s_on15s_off415s_25000avgs_filtered_batchDecon.feather"
     # )
-    broadened_f = P(basepath).joinpath(
-        "Data/2024/6/13/Buffer/283.2 K copy/106mA_23.5kHz_pre30s_on15s_off415s_25000avgs_filtered_batchDecon.feather"
-    )
+    try:
+        broadened_f = sys.argv[1]
+    except IndexError:
+        broadened_f = P(basepath).joinpath(
+            "Data/2024/6/13/Buffer/283.2 K copy/106mA_23.5kHz_pre30s_on15s_off415s_25000avgs_filtered_batchDecon.feather"
+        )
     # intrinsic_f = P(basepath).joinpath(
     #     "Data/2024/7/30/282.8 K/102mA_23.5kHz_pre30s_on10s_off410s_25000avgs_filtered_batchDecon.feather"
     # )
@@ -490,7 +549,7 @@ if __name__ == "__main__":
         "Data/2024/6/26/SL/283.0 K/106mA_23.5kHz_pre30s_on15s_off405s_25000avgs_filtered_batchDecon.feather"
     )
     pake_patterns = P(basepath).joinpath(
-        "Code/dipolar averaging/tumbling_pake_1-2_7-2_unlike_morebaseline_11ns_tcorr.txt"
+        "Code/dipolar averaging/tumbling_pake_1-2_7-2_unlike_morebaseline_13.5ns_tcorr.txt"
     )
     main(broadened_f, intrinsic_f, pake_patterns, newfit=True)
     # plt.show()

@@ -63,9 +63,9 @@ def main(filename, ri, rf, numplots):
     ax.set_ylabel("Amplitude (arb. u.)")
     ax.legend(loc=(1, 0.0))
 
-    fig.savefig(
-        P(filename).parent.joinpath(P(filename).stem + "_fig.png"), dpi=600
-    )
+    # fig.savefig(
+    #     P(filename).parent.joinpath(P(filename).stem + "_fig.png"), dpi=600
+    # )
 
 
 if __name__ == "__main__":
