@@ -14,9 +14,10 @@ import pyarrow.feather as feather
 
 if __name__ == "__main__":
     plt.style.use(["science"])
-    rc("text.latex", preamble=r"\usepackage{cmbright}")
+    # rc("text.latex", preamble=r"\usepackage{cmbright}")
     rcParams = [
-        ["font.family", "sans-serif"],
+        # ["font.family", "sans-serif"],
+        ["font.family", "serif"],
         ["font.size", 14],
         ["axes.linewidth", 1],
         ["lines.linewidth", 2],

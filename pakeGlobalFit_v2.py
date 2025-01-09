@@ -9,6 +9,7 @@ import pandas as pd
 import lmfit
 import time
 from matplotlib.colors import LogNorm
+from scipy.signal import windows
 
 if __name__ == "__main__":
     plt.style.use(["science"])
@@ -83,10 +84,21 @@ def interpolate(dataframe, newx, n=2048) -> tuple[np.ndarray, np.ndarray]:
     return newx, out.to_numpy()
 
 
-# def alpha_heaviside_tau(beta, alpha, ti, tstart, tau):
-def alpha_heaviside_tau(alpha, ti, tstart, tau):
+# def alpha_heaviside_tau(alpha, ti, t_on, t_off, tau_1, tau_2):
+def alpha_heaviside_tau(beta, alpha, ti, t_on, t_off, tau_1, tau_2):
     return (
-        alpha * np.heaviside(ti - tstart, 0.5) * np.exp(-(ti - tstart) / tau)
+        beta
+        + alpha
+        * (
+            np.heaviside(ti - t_on, 1)
+            * np.heaviside(t_off - ti, 1)
+            * (1 - np.exp(-(ti - t_on) / tau_1))
+            + (
+                1 - np.exp(-(t_off - t_on) / tau_1)
+            )  # want the recovery to start at the value the unfolding ended at, whether or not it saturated
+            * np.heaviside(ti - t_off, 1)
+            * np.exp(-(ti - t_off) / tau_2)
+        )
     )
 
 
@@ -98,14 +110,19 @@ def double_gaussian(x, params, ti):
     x1 = params["r1"]
     w1 = params["w1"]
     A = params["A"]
-    tau = params["tau"]
-    # beta = params["beta"]
+    t_on = params["t_on"]
+    t_off = params["t_off"]
+    tau_1 = params["tau_1"]
+    tau_2 = params["tau_2"]
+    beta = params["beta"]
     alpha = params["alpha"]
-    tstart = params["tstart"]
     # n = params["shift"]
 
-    # alpha_func = alpha_heaviside_tau(beta, alpha, ti, tstart, tau)
-    alpha_func = alpha_heaviside_tau(alpha, ti, tstart, tau)
+    alpha_func = alpha_heaviside_tau(
+        beta, alpha, ti, t_on, t_off, tau_1, tau_2
+    )
+    # alpha_func = alpha_heaviside_tau(alpha, ti, t_on, t_off, tau_1, tau_2)
+    # print(alpha_func)
 
     return A * (
         (1 - alpha_func)
@@ -121,20 +138,18 @@ def double_gaussian(x, params, ti):
 
 
 def fit_function(params, broadened_data, pake_data, intrinsic_lineshape, t, r):
-    # print(
-    #     broadened_data.shape,
-    #     broadened_data[:, t > params["tstart"]].shape,
-    #     t,
-    #     t > params["tstart"],
-    # )
-    resid = (
-        # broadened_data[:, t > params["tstart"]]
-        # - simulate_matrix(params, pake_data, intrinsic_lineshape, t, r)[
-        #     :, t > params["tstart"]
-        # ]
-        broadened_data
-        - simulate_matrix(params, pake_data, intrinsic_lineshape, t, r)
+    resid = broadened_data - simulate_matrix(
+        params, pake_data, intrinsic_lineshape, t, r
     )
+    # window = np.repeat(
+    #     windows.tukey(resid.shape[0], 0.25)[:, np.newaxis],
+    #     resid.shape[1],
+    #     axis=1,
+    # )
+    # resid = (
+    #     window * resid
+    # )  # element-wise with each column as a window function
+    # return resid[:, t > params["t_on"]].flatten()
     return resid.flatten()
 
 
@@ -184,23 +199,31 @@ def do_fitting(
 ) -> dict[str, float]:
     params = lmfit.create_params(
         A=dict(value=0.025, vary=True, min=0, max=0.5),
-        tau=dict(
-            value=np.max(t) / 4,
+        tau_1=dict(
+            value=np.max(t) / 20,
+            vary=True,
+            min=np.max(t) / 1000,
+            max=np.max(t) / 5,
+        ),
+        tau_2=dict(
+            value=np.max(t) / 2,
             vary=True,
             min=np.max(t) / 10,
-            max=np.max(t) / 1.5,
+            max=np.max(t) / 1.25,
+            # max=285,
         ),
-        # beta=dict(value=0.0, vary=False, min=0, max=0.1),
+        beta=dict(value=0.0, vary=False, min=0, max=1),
         # alpha_plus_beta=dict(value=0.9, vary=True, min=0, max=1),
         # alpha=dict(
         #     expr="alpha_plus_beta-beta if alpha_plus_beta-beta > 0 else 0."
         # ),
-        alpha=dict(value=0.5, vary=True, min=0, max=1),
-        tstart=dict(value=45, vary=False, min=30, max=45),
-        r0=dict(value=3.2, vary=True, min=2.0, max=6.5),
-        w0=dict(value=0.4, vary=False, min=0.2, max=4.5),
-        r1=dict(value=4.5, vary=True, min=2.0, max=6.5),
-        w1=dict(value=0.8, vary=False, min=0.1, max=0.9),
+        alpha=dict(value=0.75, vary=True, min=0, max=1),
+        t_on=dict(value=30, vary=False, min=30, max=45),
+        t_off=dict(value=45, vary=False, min=30, max=45),
+        r0=dict(value=3.2, vary=True, min=2.0, max=4.5),
+        w0=dict(value=0.34, vary=False, min=0.2, max=4.5),
+        r1=dict(value=4.5, vary=True, min=4.0, max=6.5),
+        w1=dict(value=0.6, vary=False, min=0.1, max=0.9),
         shift=dict(value=-0.005, vary=True, min=-0.1, max=0.1),
     )
 
@@ -218,9 +241,10 @@ def do_fitting(
             r,
         ),
         iter_cb=per_iter,
+        max_nfev=500,
     )
-    res = obj.minimize(method="least_squares")
-    res = obj.minimize(method="leastsq")
+    # res = obj.minimize(method="leastsq")
+    res = obj.minimize(method="nelder")
 
     end = time.perf_counter()
     print(f"Elapsed (after compilation) = {end - start:.2f} s")
@@ -383,31 +407,52 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     # axl.plot(broadened_data_centered[:, broadened_data_centered.shape[1] // 2])
     axl.plot(
         field_interp,
-        intrinsic_data_centered[:, 0]
-        / np.trapz(intrinsic_data_centered[:, 0]),
+        intrinsic_data_centered[:, 1]
+        / np.trapz(intrinsic_data_centered[:, 1]),
         label="SL",
     )
     axl.plot(
         field_interp,
-        broadened_data_centered[:, 0]
-        / np.trapz(broadened_data_centered[:, 0]),
+        broadened_data_centered[:, 1]
+        / np.trapz(broadened_data_centered[:, 1]),
         label="DL",
     )
     axl.plot(
         field_interp,
-        out[:, 0] / np.trapz(broadened_data_centered[:, 0]),
+        out[:, 1] / np.trapz(broadened_data_centered[:, 1]),
         label="DL fit",
     )
-    # axl.plot(
-    #     broadened_data_centered[:, int(res_params["tstart"]) + 5]
-    #     / np.trapz(broadened_data_centered[:, int(res_params["tstart"]) + 5]),
-    #     label="Laser on",
+    # s = np.max(
+    #     intrinsic_data_centered[:, 1] / np.trapz(intrinsic_data_centered[:, 1])
     # )
     # axl.plot(
-    #     out[:, int(res_params["tstart"]) + 5]
-    #     / np.trapz(out[:, int(res_params["tstart"]) + 5]),  # type:ignore
-    #     label="Laser on fit",
+    #     field_interp,
+    #     intrinsic_data_centered[:, intrinsic_data_centered.shape[1] // 2]
+    #     / np.trapz(
+    #         intrinsic_data_centered[:, intrinsic_data_centered.shape[1] // 2]
+    #     )
+    #     + s,
+    #     label="SL",
     # )
+    # axl.plot(
+    #     field_interp,
+    #     broadened_data_centered[:, broadened_data_centered.shape[1] // 2]
+    #     / np.trapz(
+    #         broadened_data_centered[:, broadened_data_centered.shape[1] // 2]
+    #     )
+    #     + s,
+    #     label="DL",
+    # )
+    # axl.plot(
+    #     field_interp,
+    #     out[:, out.shape[1] // 2]
+    #     / np.trapz(
+    #         broadened_data_centered[:, broadened_data_centered.shape[1] // 2]
+    #     )
+    #     + s,
+    #     label="DL fit",
+    # )
+
     axl.legend(
         # loc="upper right",
         handlelength=0.75,
@@ -427,8 +472,8 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     cmap = plt.get_cmap("viridis")
     norm = mpl.colors.Normalize(vmin=0, vmax=np.max(t))  # type: ignore
     cbar = plt.colorbar(
-        mappable=mpl.cm.ScalarMappable(norm=norm, cmap=cmap),
-        ax=axt,  # type: ignore
+        mappable=mpl.cm.ScalarMappable(norm=norm, cmap=cmap),  # type:ignore
+        ax=axt,
     )  # type: ignore
     cbar.ax.set_ylabel("Elapsed time (s)")
     for ind, ti in enumerate(np.arange(0, np.max(t), np.max(t) // N)):
@@ -456,11 +501,13 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
         t,
         100
         * alpha_heaviside_tau(
-            # res_params["beta"],
+            res_params["beta"],
             res_params["alpha"],
             t,
-            res_params["tstart"],
-            res_params["tau"],
+            res_params["t_on"],
+            res_params["t_off"],
+            res_params["tau_1"],
+            res_params["tau_2"],
         ),
         c="black",
     )
@@ -519,7 +566,8 @@ def per_iter(params, iter, resid, *args, **kwargs):
                 not in [
                     "beta",
                     "alpha_plus_beta",
-                    "tstart",
+                    "t_on",
+                    "t_off",
                     "w1",
                     "w0",
                     "shift",
@@ -546,10 +594,11 @@ if __name__ == "__main__":
     #     "Data/2024/7/30/282.8 K/102mA_23.5kHz_pre30s_on10s_off410s_25000avgs_filtered_batchDecon.feather"
     # )
     intrinsic_f = P(basepath).joinpath(
-        "Data/2024/6/26/SL/283.0 K/106mA_23.5kHz_pre30s_on15s_off405s_25000avgs_filtered_batchDecon.feather"
+        # "Data/2024/6/26/SL/283.0 K/106mA_23.5kHz_pre30s_on15s_off405s_25000avgs_filtered_batchDecon.feather"
+        "Data/2024/6/26/SL/283.0 K copy/106mA_23.5kHz_pre30s_on15s_off405s_25000avgs_filtered_batchDecon.feather"
     )
     pake_patterns = P(basepath).joinpath(
-        "Code/dipolar averaging/tumbling_pake_1-2_7-2_unlike_morebaseline_13.5ns_tcorr.txt"
+        "Code/dipolar averaging/tumbling_pake_1-2_7-2_unlike_morebaseline_13.8ns_tcorr.txt"
     )
     main(broadened_f, intrinsic_f, pake_patterns, newfit=True)
     # plt.show()

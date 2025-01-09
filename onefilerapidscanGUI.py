@@ -23,7 +23,7 @@ from scipy.signal import hilbert, sawtooth, windows, savgol_filter
 from scipy.special import jv
 from filterReal import isdigit
 
-from deconvolveRapidscan import GAMMA, sindrive
+from deconvolveRapidscan import GAMMA, sindrive, lorentzian
 from simulateRapidscan import Bloch
 
 cache = diskcache.Cache("./cache")
@@ -131,7 +131,7 @@ def save(_, phasedjson, filepath):
         d.to_feather(
             P(filepath).parent.joinpath(P(filepath).stem + add + ".feather")
         )
-        # d.to_csv(P(filepath).parent.joinpath(P(filepath).stem + add + '.dat'))
+        # d.to_csv(P(filepath).parent.joinpath(P(filepath).stem + add + ".dat"))
     # except ValueError:
     #     pass
 
@@ -277,6 +277,10 @@ def batch(
             P(filepath).stem + "_batchDecon.feather"
         )
         decondat.to_feather(savepath)
+        # decondat.to_csv(P(filepath).parent.joinpath(
+        #     P(filepath).stem + "_batchDecon.csv"
+        # )
+        # )
         # save(0, decondat, filepath)
     except (KeyError, ValueError):
         pass
@@ -327,7 +331,12 @@ def phase(auto_n, addpi_n, sigphase, datajson, curphi):
         phased["abs"] = np.real(res)
         phased["disp"] = np.imag(res)
 
+        popt, pcov = cf(lorentzian, phased["B"], phased["abs"])
+
         fig = px.line(phased, x="B", y=["abs", "disp"])
+        fig.add_scatter(
+            x=phased["B"], y=lorentzian(phased["B"], *popt), name="Lor. fit"
+        )
         fig.update_layout({"uirevision": "foo"}, overwrite=True)
         fig.update_layout(margin=margin)
 
