@@ -277,10 +277,14 @@ def batch(
             P(filepath).stem + "_batchDecon.feather"
         )
         decondat.to_feather(savepath)
-        # decondat.to_csv(P(filepath).parent.joinpath(
-        #     P(filepath).stem + "_batchDecon.csv"
-        # )
-        # )
+        decondat.to_csv(P(filepath).parent.joinpath(
+            P(filepath).stem + "_batchDecon.csv"
+        )
+        )
+        decondat.to_csv(P(filepath).parent.joinpath(
+            P(filepath).stem + "_batchDecon.txt"
+        )
+        )
         # save(0, decondat, filepath)
     except (KeyError, ValueError):
         pass

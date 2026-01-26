@@ -1,0 +1,264 @@
+import sys
+from pathlib import Path as P
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import scipy
+from matplotlib import rc
+
+if __name__ == "__main__":
+    plt.style.use(["science"])
+    rc("text.latex", preamble=r"\usepackage{cmbright}")
+    rcParams = [
+        ["font.family", "sans-serif"],
+        ["font.size", 14],
+        ["axes.linewidth", 1],
+        ["lines.linewidth", 2],
+        ["xtick.major.size", 5],
+        ["xtick.major.width", 1],
+        ["xtick.minor.size", 2],
+        ["xtick.minor.width", 1],
+        ["ytick.major.size", 5],
+        ["ytick.major.width", 1],
+        ["ytick.minor.size", 2],
+        ["ytick.minor.width", 1],
+    ]
+    plt.rcParams.update(dict(rcParams))
+
+
+def center_spectra(x, y, xrange=[-25, 25], n=2**6):
+    y_boxcar = np.cumsum(y)
+    y_boxcar = [
+        y_boxcar[ii + n] - y_boxcar[ii - n] if ii >= n and ii + n < len(y_boxcar) else 0
+        for ii, _ in enumerate(y_boxcar)
+    ]
+    x = x - x[np.argmax(y_boxcar)]
+    return x[np.logical_and(x > xrange[0], x < xrange[1])], y[
+        np.logical_and(x > xrange[0], x < xrange[1])
+    ]
+
+
+def return_centered_data(dataframe):
+    cols = [col for col in dataframe if "abs" in col]
+    out = pd.DataFrame(columns=[*cols, "B"])
+
+    for ind, col in enumerate(cols):
+        temp_B, temp_broadened = center_spectra(
+            dataframe["B"].to_numpy(),
+            dataframe[col].to_numpy(),
+        )
+        out[col] = remove_offset_and_normalize(temp_broadened)
+        if ind == 0:
+            out["B"] = temp_B
+
+    return out
+
+
+def enforce_increasing_x_axis(df, column="B"):
+    if df[column].iloc[-1] < df[column].iloc[0]:
+        df = df.iloc[::-1]
+    return df
+
+
+def remove_offset_and_normalize(y, f=0.1):
+    ind = int(len(y) * f)
+    y -= np.mean(np.sort(y)[:ind])
+    # y /= np.mean(np.sort(y)[-8:])
+    return y
+
+
+def interpolate(dataframe, newx, n=2048) -> tuple[np.ndarray, np.ndarray]:
+    newx = np.linspace(np.min(newx), np.max(newx), n)
+    cols: list[str] = [col for col in dataframe.columns if col != "B"]
+    out: pd.DataFrame = pd.DataFrame(columns=cols)
+    for col in cols:
+        out[col] = np.interp(newx, dataframe["B"], dataframe[col], left=0, right=0)
+    return newx, out.to_numpy()
+
+
+def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
+    """main.
+
+    :param broadened_file: the file to extract distances from
+    :param unbroadened_file: the intrinsic lineshape file
+    :param pake_patterns: Pake patterns for extraction
+    """
+    broadened_data = enforce_increasing_x_axis(pd.read_feather(broadened_file))
+    intrinsic_data = enforce_increasing_x_axis(pd.read_feather(intrinsic_file))
+    pake_data = pd.DataFrame(np.rot90(np.loadtxt(pake_patterns, delimiter=","), k=-1))
+    pake_data["B"] = 10 * (pake_data.iloc[:, -1] - np.mean(pake_data.iloc[:, -1]))
+
+    """
+    Now the data needs to be centered so that any fluctuations in field strength
+    or mod current or trigger timing is removed
+    """
+    # broadened data centered first
+    broadened_data_centered = return_centered_data(broadened_data)
+
+    # intrinsic data centering
+    intrinsic_data_centered = return_centered_data(intrinsic_data)
+
+    # don't need to center pake because it is being convolved
+    # do need to normalize the vector so the peak isn't huge
+    pake_data.loc[:, ~pake_data.columns.isin(["B", pake_data.columns[-2]])] /= np.max(
+        pake_data.loc[:, ~pake_data.columns.isin(["B", pake_data.columns[-2]])],
+    )
+
+    # do need to interpolate x points so their length is the same
+    # interpolate all of them to 512 points to make convolution fast
+    field = broadened_data_centered["B"]
+    field_interp, broadened_data_centered = interpolate(broadened_data_centered, field, n=512)
+    _, intrinsic_data_centered = interpolate(intrinsic_data_centered, field, n=512)
+
+    intrinsic_data_centered /= np.max(intrinsic_data_centered)
+    broadened_data_centered /= np.max(broadened_data_centered)
+
+    pake_field, pake_data = interpolate(pake_data, field, n=2048)
+    # pake_field, pake_data = interpolate(pake_data, field, n=512)
+    pake_data = pake_data[:, :-1:]  # throw away the mT field col
+    pake_data = pake_data[:, ::-1]  # reverse order
+    # plt.imshow(pake_data, aspect="auto", norm=LogNorm(vmin=1e-4, vmax=1))
+    # plt.show()
+    # raise Exception
+
+    skip_times = 1
+    tscale = 25e3 / 23.5e3
+    t = np.linspace(
+        0,
+        tscale * broadened_data_centered.shape[1],
+        broadened_data_centered[:, ::skip_times].shape[1],
+    )
+
+    """
+    At this point, pake_data and pake_field only go from -10 to 10 G, but I
+    think this is fine for convolution
+    """
+    r = np.linspace(2, 7, pake_data.shape[1])
+
+    p0 = [2.5, 4.5, 0.35, 2, 240, 0.75, -0.00]
+    bounds = [(1, 4), (2, 6), (0, 1), (1, 100), (1, 400), (0, 1), (-0.1, 0.1)]
+
+    res = scipy.optimize.minimize(
+        # res, hess_inv, *_ = scipy.optimize.leastsq(
+        objective,
+        p0,
+        args=(r, t, pake_data, broadened_data_centered, intrinsic_data_centered[:, 0]),
+        # method="L-BFGS-B",
+        bounds=bounds,
+        tol=1e-15,
+        options={"maxiter": 2000, "disp": True},
+        # full_output=1,
+    )
+    print(res)
+
+    param_names = ["x0", "x1", "A", "tau_1", "tau_2", "alpha", "shift"]
+    print(np.linalg.inv(res.hess_inv.todense()))
+    err = np.sqrt(np.diag(0.5 * res.hess_inv.todense()))
+    for i, name in enumerate(param_names):
+        print(f"{name:<8}: {res.x[i]:<6.2f}, error {err[i]:<6.2f}")
+
+    # inputs = (
+    #     torch.tensor(res.x),
+    #     torch.tensor(t),
+    #     torch.tensor(pake_data),
+    #     torch.tensor(broadened_data_centered),
+    #     torch.tensor(intrinsic_data_centered[:, 0]),
+    # )
+    # print(
+    #     hessian(objective, inputs),
+    # )
+
+
+def alpha_heaviside_tau(beta, alpha, ti, t_on, t_off, tau_1, tau_2):
+    return (
+        beta
+        + alpha
+        * (
+            np.heaviside(ti - t_on, 1)
+            * np.heaviside(t_off - ti, 1)
+            * (1 - np.exp(-(ti - t_on) / tau_1))
+            + (
+                1 - np.exp(-(t_off - t_on) / tau_1)
+            )  # want the recovery to start at the value the unfolding ended at, whether or not it saturated
+            * np.heaviside(ti - t_off, 1)
+            * np.exp(-(ti - t_off) / tau_2)
+        )
+    )
+
+
+def double_gaussian(x, x0, w0, x1, w1, A, t_on, t_off, tau_1, tau_2, beta, alpha, ti):
+    alpha_func = alpha_heaviside_tau(beta, alpha, ti, t_on, t_off, tau_1, tau_2)
+
+    return A * (
+        (1 - alpha_func) / np.sqrt(2 * np.pi * w0**2) * np.exp(-((x - x0) ** 2) / (2 * w0**2))
+        + alpha_func * (1 / np.sqrt(2 * np.pi * w1**2) * np.exp(-((x - x1) ** 2) / (2 * w1**2)))
+    )
+
+
+def objective(params, r, t, pake_data, broadened_data, intrinsic_lineshape):
+    # def objective(t, params, r, pake_data, broadened_data, intrinsic_lineshape):
+    x0, x1, A, tau_1, tau_2, alpha, shift = params
+    w0, w1, t_on, t_off = 0.34, 0.6, 30, 45
+    beta = 0
+
+    matrix = np.zeros((len(intrinsic_lineshape), len(t)))
+
+    for i, ti in enumerate(t):
+        pake_r = pake_data @ double_gaussian(
+            r,
+            x0,
+            w0,
+            x1,
+            w1,
+            A,
+            t_on,
+            t_off,
+            tau_1,
+            tau_2,
+            beta,
+            alpha,
+            ti,
+        )
+
+        # print(intrinsic_lineshape.shape, pake_r.shape)
+        if int((-1 + shift) * pake_r.shape[0] // 2) == matrix.shape[1]:
+            matrix[:, i] += np.convolve(intrinsic_lineshape, pake_r, mode="full")[
+                int((1 + shift) * pake_r.shape[0] // 2) : int((-1 + shift) * pake_r.shape[0] // 2)
+            ]
+        else:
+            matrix[:, i] += np.convolve(intrinsic_lineshape, pake_r, mode="full")[
+                int((1 + shift) * pake_r.shape[0] // 2) - 1 : int(
+                    (-1 + shift) * pake_r.shape[0] // 2,
+                )
+            ]
+
+    resid = np.sum(np.abs((broadened_data - matrix).flatten()) ** 1.5)
+    # resid = (broadened_data - matrix).flatten()
+    param_names = ["x0", "x1", "A", "tau_1", "tau_2", "alpha", "shift"]
+    # print(
+    #     *[f"{param_names[i]}={p:.2f}" for i, p in enumerate(params)],
+    #     "\t",
+    #     f"{resid:.2e}",
+    #     # f"{np.sum(resid**2):.2e}",
+    # )
+
+    return resid
+
+
+if __name__ == "__main__":
+    basepath = "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/"
+    try:
+        broadened_f = sys.argv[1]
+    except IndexError:
+        broadened_f = P(basepath).joinpath(
+            "Data/2023/5/WT FMN (30, 31 May 23)/31/FMN sample/stable copy/291.3/M01_293.1K_100mA_stable_pre30s_on10s_off470s_25000avgs_filtered_batchDecon.feather",
+        )
+    intrinsic_f = P(basepath).joinpath(
+        # "Data/2024/6/26/SL/283.0 K copy/106mA_23.5kHz_pre30s_on15s_off405s_25000avgs_filtered_batchDecon.feather",
+        "Data/2024/7/29/293 K/100mA_23.5kHz_pre30s_on10s_off230s_25000avgs_filtered_batchDecon.feather",
+    )
+    pake_patterns = P(basepath).joinpath(
+        "Code/dipolar averaging/tumbling_pake_1-2_7-2_unlike_morebaseline_13.8ns_tcorr.txt",
+    )
+    main(broadened_f, intrinsic_f, pake_patterns, newfit=True)

@@ -1,26 +1,22 @@
-import os
 import ast
 import sys
 from pathlib import Path as P
-from pathlib import PurePath as PP
-from tqdm import tqdm
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-import PIL
-import pyarrow.feather as feather
-from matplotlib import rc
-from matplotlib.animation import FuncAnimation, PillowWriter
-from scipy.integrate import cumulative_trapezoid
-from scipy.optimize import curve_fit as cf
-from scipy.interpolate import interp1d
-from scipy.signal import hilbert
-
-from deconvolveRapidscan import gaussian, lorentzian
+from deconvolveRapidscan import lorentzian
 from filterReal import isdigit
 from fitsVStime import plotfits
+from matplotlib.animation import FuncAnimation
+from pyarrow import feather
+from scipy.integrate import cumulative_trapezoid
+from scipy.interpolate import interp1d
+from scipy.optimize import curve_fit as cf
+from scipy.signal import hilbert
+from tqdm import tqdm
+
+XLABEL = "Field (T)"
 
 if __name__ == "__main__":
     plt.style.use(["science"])
@@ -62,9 +58,7 @@ def process(
     # dat = pd.read_csv(filename)
     cols = [ii for ii in dat.columns if "abs" in ii]
 
-    times = np.array(
-        ast.literal_eval(P(filename).parent.joinpath("times.txt").read_text())
-    )
+    times = np.array(ast.literal_eval(P(filename).parent.joinpath("times.txt").read_text()))
     tstep = np.mean(np.diff(times))
     ts = np.insert(np.diff(times), 0, 0)
     ts = cumulative_trapezoid(ts)
@@ -82,22 +76,14 @@ def process(
 
     cmap = plt.get_cmap("cool")
     norm = mpl.colors.Normalize(vmin=0, vmax=len(cols) * tstep)
-    cbar = plt.colorbar(
-        mappable=mpl.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax
-    )
+    cbar = plt.colorbar(mappable=mpl.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax)
     cbar.ax.set_ylabel("Elapsed time (s)")
 
     name = P(filename).parent.joinpath(P(filename).stem + "_combined.dat")
-    fitname = P(filename).parent.joinpath(
-        P(filename).stem + "_combined_fits.dat"
-    )
-    fitparamname = P(filename).parent.joinpath(
-        P(filename).stem + "_combined_fitparams.txt"
-    )
+    fitname = P(filename).parent.joinpath(P(filename).stem + "_combined_fits.dat")
+    fitparamname = P(filename).parent.joinpath(P(filename).stem + "_combined_fitparams.txt")
     snrname = P(filename).parent.joinpath(P(filename).stem + "_snr.txt")
-    peakname = P(filename).parent.joinpath(
-        P(filename).stem + "_combined_peaks.txt"
-    )
+    peakname = P(filename).parent.joinpath(P(filename).stem + "_combined_peaks.txt")
 
     # SNR = np.empty(len(cols))
     n = 1024
@@ -107,9 +93,7 @@ def process(
 
         if np.max(B) != np.max(np.abs(B)):
             raise Exception("Field values weren't generated correctly.")
-        vals = np.where(
-            np.logical_and(B > plotfields[0], B < plotfields[1]) == True
-        )[0]
+        vals = np.where(np.logical_and(plotfields[0] < B, plotfields[1] > B) == True)[0]
         l = vals[0]
         h = vals[-1]
 
@@ -130,7 +114,7 @@ def process(
         nang = 256
         angs = np.linspace(0, np.pi, nang)
 
-        for i in tqdm(range(0, len(cols))):
+        for i in tqdm(range(len(cols))):
             c = cols[i]
             disp = dat[c.replace("abs", "disp")].to_numpy()[l:h]
             # disp -= np.mean(disp[:32])
@@ -145,7 +129,7 @@ def process(
                 abss = [
                     np.abs(
                         np.mean(np.real(np.exp(-1j * ang) * M)[:n])
-                        - np.mean(np.real(np.exp(-1j * ang) * M)[-n:])
+                        - np.mean(np.real(np.exp(-1j * ang) * M)[-n:]),
                     )
                     for ang in np.linspace(0, np.pi, nang)
                 ]
@@ -202,9 +186,7 @@ def process(
                 #                 np.min(np.real(R)), np.max(np.real(R)), B[np.argmax(np.real(R))], 5])
                 # fity = gaussian(B, *popt)
                 f = interp1d(B, R)
-                pk2pk = np.abs(
-                    B[np.argmin(np.diff(fity))] - B[np.argmax(np.diff(fity))]
-                )
+                pk2pk = np.abs(B[np.argmin(np.diff(fity))] - B[np.argmax(np.diff(fity))])
                 # interpB = np.linspace(np.min(B), np.max(B), 100000)
                 # interpR = f(interpB)
                 # FWHM = np.abs(
@@ -215,17 +197,11 @@ def process(
                 out = list(popt) + [pk2pk, rawpk2pk]
                 fitdata[:, i + 1] = fity
                 fitparams[str(c) + "_popt"] = repr(list(out))
-                fitparams[str(c) + "_pcov"] = repr(
-                    list(np.sqrt(np.diag(pcov)))
-                )
+                fitparams[str(c) + "_pcov"] = repr(list(np.sqrt(np.diag(pcov))))
             except RuntimeError:
                 rawpk2pk = np.max(R) - np.min(R)
-                fitparams[str(c) + "_popt"] = repr(
-                    [0] * len(popt) + [0, rawpk2pk]
-                )
-                fitparams[str(c) + "_pcov"] = repr(
-                    [0] * len(popt) + [0, rawpk2pk]
-                )
+                fitparams[str(c) + "_popt"] = repr([0] * len(popt) + [0, rawpk2pk])
+                fitparams[str(c) + "_pcov"] = repr([0] * len(popt) + [0, rawpk2pk])
 
             loopdata[:, i + 1] = R
             dispdata[:, i + 1] = np.real(M)
@@ -280,9 +256,7 @@ def process(
 
         lim = 20
         try:
-            for i in range(
-                1, len(loopdata[0, :]), int(len(loopdata[0, :]) / 7)
-            ):
+            for i in range(1, len(loopdata[0, :]), int(len(loopdata[0, :]) / 7)):
                 # xx = np.copy(x) - (x[np.argmin(loopdata[:, i])] + x[np.argmax(loopdata[:, i])])/2
                 xx = x - x[np.argmax(loopdata[:, i])]
                 a.plot(
@@ -310,7 +284,7 @@ def process(
         # a.annotate("a)", xy=(-lim * 1.5, 8.3), transform=a.transAxes)
 
         a.set_ylabel("Signal (arb. u.)")
-        a.set_xlabel("Field (G)")
+        a.set_xlabel(XLABEL)
         a.set_xlim(left=-1.6 * lim)
         # a.set_ylim(top=4.5)
 
@@ -318,7 +292,7 @@ def process(
         for i in [1, 2]:
             fcomp, acomp = plt.subplots()
             acomp.set_ylabel("Signal (arb. u.)")
-            acomp.set_xlabel("Field (G)")
+            acomp.set_xlabel(XLABEL)
 
             # y0 = np.copy(loopdata[:, np.argmin(np.abs(ts - ontimes[0]))])
             if i == 1:
@@ -375,11 +349,9 @@ def process(
 
         # SNR = [np.max(y) / np.std(y[:n])]
         ax.set_ylabel("Signal (arb. u)")
-        ax.set_xlabel("Field (G)")
+        ax.set_xlabel(XLABEL)
         ax.set_ylim([mn, 1.05])
-        text = ax.text(
-            0.425, 1.05, f"$t={ts[0]:.1f}$ s", transform=ax.transAxes
-        )
+        text = ax.text(0.425, 1.05, f"$t={ts[0]:.1f}$ s", transform=ax.transAxes)
 
         # SNRtext = ax.text(0.1,
         #                   0.25,
@@ -446,9 +418,7 @@ if __name__ == "__main__":
         filename = "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2024/1/26/414 mutant/282.98K/103mA_pre30s_on30s_off1130s_25000avgs_filtered.dat"
 
     if not P(filename).stem.endswith("Decon"):
-        filename = P(filename).parent.joinpath(
-            P(filename).stem + "_batchDecon.feather"
-        )
+        filename = P(filename).parent.joinpath(P(filename).stem + "_batchDecon.feather")
         # P(filename).stem + '_batchDecon.dat')
 
     try:
@@ -467,53 +437,35 @@ if __name__ == "__main__":
             "".join(
                 [
                     ii
-                    for ii in "".join(
-                        [
-                            kk
-                            for kk in P(filename).stem.split("_")
-                            if "on" in kk
-                        ]
-                    )
+                    for ii in "".join([kk for kk in P(filename).stem.split("_") if "on" in kk])
                     if isdigit(ii)
-                ]
-            )
+                ],
+            ),
         )
         off = float(
             "".join(
                 [
                     ii
-                    for ii in "".join(
-                        [
-                            kk
-                            for kk in P(filename).stem.split("_")
-                            if "off" in kk
-                        ]
-                    )
+                    for ii in "".join([kk for kk in P(filename).stem.split("_") if "off" in kk])
                     if isdigit(ii)
-                ]
-            )
+                ],
+            ),
         )
         pre = float(
             "".join(
                 [
                     ii
-                    for ii in "".join(
-                        [
-                            kk
-                            for kk in P(filename).stem.split("_")
-                            if "pre" in kk
-                        ]
-                    )
+                    for ii in "".join([kk for kk in P(filename).stem.split("_") if "pre" in kk])
                     if isdigit(ii)
-                ]
-            )
+                ],
+            ),
         )
         ontimes = (pre, pre + on)
     except ValueError:
         ontimes = (0, 0)
         # ontimes = (0, 25)
         print(
-            f"Could not detect the experiment timings.\nDefaulting to ON at {ontimes[0]:.1f} s and OFF at {ontimes[1]:.1f} s."
+            f"Could not detect the experiment timings.\nDefaulting to ON at {ontimes[0]:.1f} s and OFF at {ontimes[1]:.1f} s.",
         )
     tstep, ani = process(
         filename,
@@ -529,9 +481,7 @@ if __name__ == "__main__":
         ani.save(
             P(filename).parent.joinpath("animation.mp4"),
             dpi=300,
-            progress_callback=lambda i, n: print(
-                f"Saving frame {i + 1}/{n}", end="\r"
-            ),
+            progress_callback=lambda i, n: print(f"Saving frame {i + 1}/{n}", end="\r"),
         )
     # ani.save(P(filename).parent.joinpath('animation.gif'),
     #          dpi=400, writer=PillowWriter(fps=1 / (tstep)))
@@ -539,9 +489,7 @@ if __name__ == "__main__":
     #          dpi=400,
     #          writer=PillowWriter(fps=10))
     plotfits(
-        P(filename).parent.joinpath(
-            P(filename).stem + "_combined_fitparams.txt"
-        ),
+        P(filename).parent.joinpath(P(filename).stem + "_combined_fitparams.txt"),
         ontimes=ontimes,
     )
     # plt.show()

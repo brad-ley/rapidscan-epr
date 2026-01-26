@@ -35,9 +35,7 @@ if __name__ == "__main__":
     plt.rcParams.update(dict(rcParams))
 
 
-def lorentzian(
-    x: np.ndarray, x0: float, a: float, b: float, c: float
-) -> np.ndarray:
+def lorentzian(x: np.ndarray, x0: float, a: float, b: float, c: float) -> np.ndarray:
     """lorentzian.
 
     :param x: x-axis array
@@ -53,9 +51,7 @@ def fit_fun(params, data, B):
     """
     Fit handler to return the RMSE deviation from ideal double_lorentzian
     """
-    return (data - double_lorentzian(params, B)) ** 2 * lorentzian_sum(
-        params, B
-    ) ** 2
+    return (data - double_lorentzian(params, B)) ** 2 * lorentzian_sum(params, B) ** 2
 
 
 def lorentzian_sum(params, x):
@@ -98,62 +94,42 @@ class DataSet:
         self.cols = [ii for ii in self.mat.columns if "abs" in ii]
         B = self.mat["B"].to_numpy()
         first = self.mat[self.cols[0]].to_numpy()[np.abs(B) < plotfield]
-        plotcenter = B[
-            np.where(np.abs(B) < plotfield)[0][0] + np.argmax(first)
-        ]
+        plotcenter = B[np.where(np.abs(B) < plotfield)[0][0] + np.argmax(first)]
         plotlim = plotcenter + np.array([-plotfield, plotfield])
         lims = np.where(np.logical_and(B >= plotlim[0], B < plotlim[1]))
         self.low = lims[0][0]
         self.high = lims[0][-1]
         self.B = B[self.low : self.high] - plotcenter
         self.times = np.array(
-            ast.literal_eval(
-                P(self.filename).parent.joinpath("times.txt").read_text()
-            )
+            ast.literal_eval(P(self.filename).parent.joinpath("times.txt").read_text())
         )
 
         self.dat = self.mat[self.cols].to_numpy()[self.low : self.high, :]
 
         if "_pre" in P(self.filename).stem:
-            pre = "".join(
-                [
-                    ii
-                    for ii in P(self.filename).stem.split("_")
-                    if "pre" in ii and "s" in ii
-                ]
-            )
+            pre = "".join([
+                ii for ii in P(self.filename).stem.split("_") if "pre" in ii and "s" in ii
+            ])
             self.pre = float("".join([ii for ii in list(pre) if ii.isdigit()]))
         if "_on" in P(self.filename).stem:
-            on = "".join(
-                [
-                    ii
-                    for ii in P(self.filename).stem.split("_")
-                    if "on" in ii and "s" in ii
-                ]
-            )
+            on = "".join([
+                ii for ii in P(self.filename).stem.split("_") if "on" in ii and "s" in ii
+            ])
             self.on = float("".join([ii for ii in list(on) if ii.isdigit()]))
 
     def center(self):
         self.dat = np.zeros(((self.high - self.low), len(self.cols)))
 
-        nearcenter = (
-            self.low + (self.high - self.low) // 2
-        )  # should be near middle of field
+        nearcenter = self.low + (self.high - self.low) // 2  # should be near middle of field
         for ind, col in enumerate(self.cols):
             # center = np.argmax(mat[col][l:h].to_numpy()) + l
             tdat = self.mat[col][self.low : self.high].to_numpy()
             # n = 2**3
             n = 2**7
-            rolling = np.array(
-                [
-                    (
-                        np.mean(tdat[ii - n : ii + n])
-                        if (ii > n and len(tdat) - ii > n)
-                        else 0
-                    )
-                    for ii, _ in enumerate(tdat)
-                ]
-            )
+            rolling = np.array([
+                (np.mean(tdat[ii - n : ii + n]) if (ii > n and len(tdat) - ii > n) else 0)
+                for ii, _ in enumerate(tdat)
+            ])
             center = np.argmax(rolling) + self.low
             if (
                 np.abs(nearcenter - center) / nearcenter < 0.2
@@ -190,17 +166,12 @@ class DataSet:
     def svd(self, k=None):
         U, E, Vh = np.linalg.svd(self.dat)
 
-        ratios = np.array(
-            [
-                E[idx] / E[idx + 1] if idx + 1 < len(E) else 0
-                for idx, _ in enumerate(E)
-            ]
-        )
+        ratios = np.array([
+            E[idx] / E[idx + 1] if idx + 1 < len(E) else 0 for idx, _ in enumerate(E)
+        ])
         lim = 1.5
         if not k:
-            k = np.where(ratios < lim)[0][
-                0
-            ]  # find first time it goes below 1.5
+            k = np.where(ratios < lim)[0][0]  # find first time it goes below 1.5
 
         # if k == 0:
         if k < 2:
@@ -232,9 +203,7 @@ class DataSet:
             dat = self.subbasis_data
             self.imshow_sim, self.a_sim = plt.subplots()
             a = self.a_sim
-            self.a_sim.set_title(
-                f"PCA ($k = {self.k}$) sub-basis recreated data"
-            )
+            self.a_sim.set_title(f"PCA ($k = {self.k}$) sub-basis recreated data")
         else:
             dat = self.dat
             self.imshow_raw, self.a_raw = plt.subplots()
@@ -247,10 +216,21 @@ class DataSet:
         a.set_xlabel("Time (s)")
         a.set_ylabel("Intensity (arb. u)")
 
-        return self
-
     def show(self):
         plt.show()
+        return self
+
+    def close_plot(self):
+        if hasattr(self, "imshow_sim"):
+            plt.close(self.imshow_sim)
+        if hasattr(self, "imshow_raw"):
+            plt.close(self.imshow_raw)
+        if hasattr(self, "fscree"):
+            plt.close(self.fscree)
+        if hasattr(self, "lsvf"):
+            plt.close(self.lsvf)
+        if hasattr(self, "rsvf"):
+            plt.close(self.rsvf)
         return self
 
     def plotSVs(self):
@@ -289,9 +269,9 @@ class DataSet:
                         ls="--",
                         label=rf"$\omega={popt[-1]:.2f}\,$G",
                     )
-                    print("single", popt, pcov)
-                    print("single", err)
-                    print("single", err[-1])
+                    # print("single", popt, pcov)
+                    # print("single", err)
+                    # print("single", err[-1])
                 if idx + 1 == find:
                     # print(
                     #     "Data integrals: (raw, absolute value)",
@@ -345,9 +325,9 @@ class DataSet:
                     )
                     self.res = obj.minimize(method="leastsquares")
                     parvals = self.res.params.valuesdict()  # type: ignore
-                    print([(key, parvals[key]) for key in parvals])
-                    print(self.res.covar)
-                    print(2 * np.sqrt(np.diag(self.res.covar)))  # type: ignore
+                    # print([(key, parvals[key]) for key in parvals])
+                    # print(self.res.covar)
+                    # print(2 * np.sqrt(np.diag(self.res.covar)))  # type: ignore
 
                     x0 = parvals["x0"]
                     a1 = parvals["a1"]
@@ -442,11 +422,9 @@ class DataSet:
             try:
                 popt, pcov = curve_fit(
                     exp,
-                    self.times[self.times > self.pre + self.on]
-                    - (self.pre + self.on),
+                    self.times[self.times > self.pre + self.on] - (self.pre + self.on),
                     # self.E[idx]
-                    np.sign(self.E[idx])
-                    * self.Vh[idx, :][self.times > self.pre + self.on],
+                    np.sign(self.E[idx]) * self.Vh[idx, :][self.times > self.pre + self.on],
                     p0=[
                         np.min(self.Vh[idx, :]),
                         np.max(self.Vh[idx, :]),
@@ -463,8 +441,7 @@ class DataSet:
                     self.rsva[idx, 0].plot(
                         self.times[self.times > self.pre + self.on],
                         exp(
-                            self.times[self.times > self.pre + self.on]
-                            - (self.pre + self.on),
+                            self.times[self.times > self.pre + self.on] - (self.pre + self.on),
                             *popt,
                         )
                         + 0.0 * idx,
@@ -477,9 +454,11 @@ class DataSet:
                     self.popt = popt
                     self.err = err
 
-                print("tau", error_bar)
+                # print("tau", error_bar)
             except RuntimeError:
                 print(f"Could not fit w_{idx + 1} component")
+            except AttributeError:
+                print(f"No light on-off info for this file ({self.filename.name}).")
             try:
                 self.rsva[idx, 0].axvspan(
                     self.pre,
@@ -488,8 +467,8 @@ class DataSet:
                     alpha=0.25,
                     label="Laser on",
                 )
-            except ValueError:
-                pass
+            except (ValueError, RuntimeError, AttributeError):
+                print(f"No light on-off info for this file ({self.filename.name}).")
             self.rsva[idx, 0].legend(
                 loc="right",
                 handlelength=0.75,
@@ -518,15 +497,11 @@ class DataSet:
         if hasattr(self, "imshow_sim"):
             if hasattr(self, "subbasis"):
                 add += "subbasis_"
-            self.imshow_sim.savefig(
-                path.joinpath(f"{add}imshow_sim.png"), dpi=1200
-            )
+            self.imshow_sim.savefig(path.joinpath(f"{add}imshow_sim.png"), dpi=1200)
         if hasattr(self, "imshow_raw"):
             if hasattr(self, "subbasis"):
                 add += "subbasis_"
-            self.imshow_raw.savefig(
-                path.joinpath(f"{add}imshow_raw.png"), dpi=1200
-            )
+            self.imshow_raw.savefig(path.joinpath(f"{add}imshow_raw.png"), dpi=1200)
         if hasattr(self, "fscree"):
             self.fscree.savefig(path.joinpath("scree.png"), dpi=1200)
 
@@ -568,25 +543,19 @@ class DataSet:
         if ratio_to_first[0][0] != 1:
             raise Exception("ratio_to_first of first must be 1")
         if len(ratio_to_first) != len(linewidths):
-            raise Exception(
-                "Linewidth and ratio_to_first list lengths do not match"
-            )
+            raise Exception("Linewidth and ratio_to_first list lengths do not match")
         if type(tau) is list:
             taus = np.copy(tau)
             if len(tau) != len(linewidths):
-                raise Exception(
-                    "Tau and ratio_to_first list lengths do not match"
-                )
+                raise Exception("Tau and ratio_to_first list lengths do not match")
         else:
             taus = [tau] * len(linewidths)
         if naive and len(linewidths) > 1:
-            raise Exception(
-                "Naive takes only one linewidth and delta as input"
-            )
+            raise Exception("Naive takes only one linewidth and delta as input")
 
-        if naive:
-            linewidth = linewidths + np.concatenate(
-                (
+        try:
+            if naive:
+                linewidth = linewidths + np.concatenate((
                     np.zeros(np.where(self.times > (self.pre))[0][0]),
                     exp(
                         self.times[self.times > (self.pre)] - (self.pre),
@@ -594,22 +563,20 @@ class DataSet:
                         ratio_to_first[0][1],
                         taus[0],
                     ),
-                )
-            )
-            self.simulated = np.zeros((self.B.shape[0], self.times.shape[0]))
-            for idx, lw in enumerate(linewidth):
-                self.simulated[:, idx] = lorentzian(self.B, 0, 0, 1, lw)
+                ))
+                self.simulated = np.zeros((self.B.shape[0], self.times.shape[0]))
+                for idx, lw in enumerate(linewidth):
+                    self.simulated[:, idx] = lorentzian(self.B, 0, 0, 1, lw)
 
-        else:
-            lw_matrix = np.zeros((self.B.shape[0], len(linewidths)))
+            else:
+                lw_matrix = np.zeros((self.B.shape[0], len(linewidths)))
 
-            for idx, linewidth in enumerate(linewidths):
-                lw_matrix[:, idx] = lorentzian(self.B, 0, 0, 1, linewidth)
+                for idx, linewidth in enumerate(linewidths):
+                    lw_matrix[:, idx] = lorentzian(self.B, 0, 0, 1, linewidth)
 
-            t_matrix = np.zeros((len(ratio_to_first), self.times.shape[0]))
-            for idx, (ratio, ratio_delta) in enumerate(ratio_to_first):
-                t_matrix[idx, :] = ratio + np.concatenate(
-                    (
+                t_matrix = np.zeros((len(ratio_to_first), self.times.shape[0]))
+                for idx, (ratio, ratio_delta) in enumerate(ratio_to_first):
+                    t_matrix[idx, :] = ratio + np.concatenate((
                         np.zeros(np.where(self.times > (self.pre))[0][0]),
                         exp(
                             self.times[self.times > (self.pre)] - (self.pre),
@@ -617,14 +584,17 @@ class DataSet:
                             ratio_delta,
                             taus[idx],
                         ),
-                    )
-                )
+                    ))
 
-                if idx:  # make sure that it isn't the first component, then subtract the weight of the 2-nth component
-                    t_matrix[0, :] -= t_matrix[idx, :]
+                    if idx:  # make sure that it isn't the first component, then subtract the weight of the 2-nth component
+                        t_matrix[0, :] -= t_matrix[idx, :]
 
-            self.simulated = lw_matrix @ t_matrix
-        self.sim_components = len(linewidths)
+                self.simulated = lw_matrix @ t_matrix
+            self.sim_components = len(linewidths)
+
+        except AttributeError:
+            print(f"No light on-off info for this file ({self.filename.name}).")
+
         return self
 
     def use_simulate_as_data(self, **kwargs):
@@ -672,27 +642,15 @@ class DataSet:
 def clean_input(folder):
     print(folder)
     if P(folder).is_dir():
-        fnames = []
-        for fold in [fold for fold in P(folder).iterdir() if fold.is_dir()]:
-            if any(
-                [
-                    file
-                    for file in P(fold).iterdir()
-                    if file.suffix == ".feather"
-                ]
-            ):
-                fnames.append(
-                    *[
-                        file
-                        for file in P(fold).iterdir()
-                        if file.suffix == ".feather"
-                    ]
-                )
+        files = P(folder).rglob("*.feather")
+        fnames = [ii for ii in files if not ii.parent.joinpath("SVD/PC2_fits.txt").exists()]
+        # fnames = []
+        # for fold in [fold for fold in P(folder).iterdir() if fold.is_dir()]:
+        #     if any([file for file in P(fold).iterdir() if file.suffix == ".feather"]):
+        #         fnames.append(*[file for file in P(fold).iterdir() if file.suffix == ".feather"])
     else:
         if not P(folder).stem.endswith("Decon"):
-            folder = P(folder).parent.joinpath(
-                P(folder).stem + "_batchDecon.feather"
-            )
+            folder = P(folder).parent.joinpath(P(folder).stem + "_batchDecon.feather")
         fnames = [folder]
     return fnames
 
@@ -714,6 +672,7 @@ def main(filename):
     DS.plotSVs()
     DS.plotMatrix()
     DS.saveResults()
+    DS.close_plot()
     # DS.show()
 
 
@@ -727,7 +686,7 @@ if __name__ == "__main__":
     for fname in tqdm(fnames):
         try:
             main(fname)
-        # except ValueError:
-        except IndexError:
+            # plt.close()
+        except ValueError:
+            # except IndexError:
             print(f"ERROR with file: {fname}")
-        plt.close()

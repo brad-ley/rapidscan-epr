@@ -1,15 +1,13 @@
 import ast
 import sys
+import time
 from pathlib import Path as P
 
-import matplotlib.pyplot as plt
+import lmfit
 import matplotlib as mpl
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import lmfit
-import time
-from matplotlib.colors import LogNorm
-from scipy.signal import windows
 
 if __name__ == "__main__":
     plt.style.use(["science"])
@@ -34,9 +32,7 @@ if __name__ == "__main__":
 def center_spectra(x, y, xrange=[-25, 25], n=2**6):
     y_boxcar = np.cumsum(y)
     y_boxcar = [
-        y_boxcar[ii + n] - y_boxcar[ii - n]
-        if ii >= n and ii + n < len(y_boxcar)
-        else 0
+        y_boxcar[ii + n] - y_boxcar[ii - n] if ii >= n and ii + n < len(y_boxcar) else 0
         for ii, _ in enumerate(y_boxcar)
     ]
     x = x - x[np.argmax(y_boxcar)]
@@ -51,7 +47,8 @@ def return_centered_data(dataframe):
 
     for ind, col in enumerate(cols):
         temp_B, temp_broadened = center_spectra(
-            dataframe["B"].to_numpy(), dataframe[col].to_numpy()
+            dataframe["B"].to_numpy(),
+            dataframe[col].to_numpy(),
         )
         out[col] = remove_offset_and_normalize(temp_broadened)
         if ind == 0:
@@ -78,9 +75,7 @@ def interpolate(dataframe, newx, n=2048) -> tuple[np.ndarray, np.ndarray]:
     cols: list[str] = [col for col in dataframe.columns if col != "B"]
     out: pd.DataFrame = pd.DataFrame(columns=cols)  # type: ignore
     for col in cols:
-        out[col] = np.interp(
-            newx, dataframe["B"], dataframe[col], left=0, right=0
-        )
+        out[col] = np.interp(newx, dataframe["B"], dataframe[col], left=0, right=0)
     return newx, out.to_numpy()
 
 
@@ -118,29 +113,18 @@ def double_gaussian(x, params, ti):
     alpha = params["alpha"]
     # n = params["shift"]
 
-    alpha_func = alpha_heaviside_tau(
-        beta, alpha, ti, t_on, t_off, tau_1, tau_2
-    )
+    alpha_func = alpha_heaviside_tau(beta, alpha, ti, t_on, t_off, tau_1, tau_2)
     # alpha_func = alpha_heaviside_tau(alpha, ti, t_on, t_off, tau_1, tau_2)
     # print(alpha_func)
 
     return A * (
-        (1 - alpha_func)
-        / np.sqrt(2 * np.pi * w0**2)
-        * np.exp(-((x - x0) ** 2) / (2 * w0**2))
-        + alpha_func
-        * (
-            1
-            / np.sqrt(2 * np.pi * w1**2)
-            * np.exp(-((x - x1) ** 2) / (2 * w1**2))
-        )
+        (1 - alpha_func) / np.sqrt(2 * np.pi * w0**2) * np.exp(-((x - x0) ** 2) / (2 * w0**2))
+        + alpha_func * (1 / np.sqrt(2 * np.pi * w1**2) * np.exp(-((x - x1) ** 2) / (2 * w1**2)))
     )
 
 
 def fit_function(params, broadened_data, pake_data, intrinsic_lineshape, t, r):
-    resid = broadened_data - simulate_matrix(
-        params, pake_data, intrinsic_lineshape, t, r
-    )
+    resid = broadened_data - simulate_matrix(params, pake_data, intrinsic_lineshape, t, r)
     # window = np.repeat(
     #     windows.tukey(resid.shape[0], 0.25)[:, np.newaxis],
     #     resid.shape[1],
@@ -176,26 +160,22 @@ def simulate_matrix(params, pake_data, intrinsic_lineshape, t, r):
         pake_r = pake_data @ double_gaussian(r, params, ti)
 
         if int((-1 + n) * pake_r.shape[0] // 2) == matrix.shape[1]:
-            matrix[:, i] += np.convolve(
-                intrinsic_lineshape, pake_r, mode="full"
-            )[
-                int((1 + n) * pake_r.shape[0] // 2) : int(
-                    (-1 + n) * pake_r.shape[0] // 2
-                )
+            matrix[:, i] += np.convolve(intrinsic_lineshape, pake_r, mode="full")[
+                int((1 + n) * pake_r.shape[0] // 2) : int((-1 + n) * pake_r.shape[0] // 2)
             ]
         else:
-            matrix[:, i] += np.convolve(
-                intrinsic_lineshape, pake_r, mode="full"
-            )[
-                int((1 + n) * pake_r.shape[0] // 2) - 1 : int(
-                    (-1 + n) * pake_r.shape[0] // 2
-                )
+            matrix[:, i] += np.convolve(intrinsic_lineshape, pake_r, mode="full")[
+                int((1 + n) * pake_r.shape[0] // 2) - 1 : int((-1 + n) * pake_r.shape[0] // 2)
             ]
     return matrix
 
 
 def do_fitting(
-    broadened_data_centered, pake_data, intrinsic_data_centered, t, r
+    broadened_data_centered,
+    pake_data,
+    intrinsic_data_centered,
+    t,
+    r,
 ) -> dict[str, float]:
     params = lmfit.create_params(
         A=dict(value=0.025, vary=True, min=0, max=0.5),
@@ -212,18 +192,58 @@ def do_fitting(
             max=np.max(t) / 1.25,
             # max=285,
         ),
-        beta=dict(value=0.0, vary=False, min=0, max=1),
+        beta=dict(
+            value=0.0,
+            vary=False,
+            min=0,
+            max=1,
+        ),
         # alpha_plus_beta=dict(value=0.9, vary=True, min=0, max=1),
         # alpha=dict(
         #     expr="alpha_plus_beta-beta if alpha_plus_beta-beta > 0 else 0."
         # ),
-        alpha=dict(value=0.75, vary=True, min=0, max=1),
-        t_on=dict(value=30, vary=False, min=30, max=45),
-        t_off=dict(value=45, vary=False, min=30, max=45),
-        r0=dict(value=3.2, vary=True, min=2.0, max=4.5),
-        w0=dict(value=0.34, vary=False, min=0.2, max=4.5),
-        r1=dict(value=4.5, vary=True, min=4.0, max=6.5),
-        w1=dict(value=0.6, vary=False, min=0.1, max=0.9),
+        alpha=dict(
+            value=0.75,
+            vary=True,
+            min=0,
+            max=1,
+        ),
+        t_on=dict(
+            value=30,
+            vary=False,
+            min=30,
+            max=45,
+        ),
+        t_off=dict(
+            value=45,
+            vary=False,
+            min=30,
+            max=45,
+        ),
+        r0=dict(
+            value=3.2,
+            vary=True,
+            min=2.0,
+            max=5,
+        ),
+        w0=dict(
+            value=0.34,
+            vary=True,
+            min=0.2,
+            max=1,
+        ),
+        r1=dict(
+            value=4.5,
+            vary=True,
+            min=3,
+            max=6.5,
+        ),
+        w1=dict(
+            value=0.6,
+            vary=True,
+            min=0.2,
+            max=1,
+        ),
         shift=dict(value=-0.005, vary=True, min=-0.1, max=0.1),
     )
 
@@ -242,14 +262,18 @@ def do_fitting(
         ),
         iter_cb=per_iter,
         max_nfev=500,
+        # nan_policy="propagate",
     )
-    # res = obj.minimize(method="leastsq")
-    res = obj.minimize(method="nelder")
+    # res = obj.minimize(method="nelder")
+
+    res = obj.minimize(method="leastsq")
 
     end = time.perf_counter()
     print(f"Elapsed (after compilation) = {end - start:.2f} s")
 
-    res_params = res.params.valuesdict()  # type: ignore
+    print(res.errorbars)
+
+    res_params = res.params.valuesdict()
     return res_params
 
 
@@ -262,12 +286,8 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     """
     broadened_data = enforce_increasing_x_axis(pd.read_feather(broadened_file))
     intrinsic_data = enforce_increasing_x_axis(pd.read_feather(intrinsic_file))
-    pake_data = pd.DataFrame(
-        np.rot90(np.loadtxt(pake_patterns, delimiter=","), k=-1)
-    )
-    pake_data["B"] = 10 * (
-        pake_data.iloc[:, -1] - np.mean(pake_data.iloc[:, -1])
-    )
+    pake_data = pd.DataFrame(np.rot90(np.loadtxt(pake_patterns, delimiter=","), k=-1))
+    pake_data["B"] = 10 * (pake_data.iloc[:, -1] - np.mean(pake_data.iloc[:, -1]))
 
     """
     Now the data needs to be centered so that any fluctuations in field strength
@@ -282,21 +302,15 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
 
     # don't need to center pake because it is being convolved
     # do need to normalize the vector so the peak isn't huge
-    pake_data.loc[
-        :, ~pake_data.columns.isin(["B", pake_data.columns[-2]])
-    ] /= np.max(
-        pake_data.loc[:, ~pake_data.columns.isin(["B", pake_data.columns[-2]])]
+    pake_data.loc[:, ~pake_data.columns.isin(["B", pake_data.columns[-2]])] /= np.max(
+        pake_data.loc[:, ~pake_data.columns.isin(["B", pake_data.columns[-2]])],
     )
 
     # do need to interpolate x points so their length is the same
     # interpolate all of them to 512 points to make convolution fast
     field = broadened_data_centered["B"]
-    field_interp, broadened_data_centered = interpolate(
-        broadened_data_centered, field, n=512
-    )
-    _, intrinsic_data_centered = interpolate(
-        intrinsic_data_centered, field, n=512
-    )
+    field_interp, broadened_data_centered = interpolate(broadened_data_centered, field, n=512)
+    _, intrinsic_data_centered = interpolate(intrinsic_data_centered, field, n=512)
 
     intrinsic_data_centered /= np.max(intrinsic_data_centered)
     broadened_data_centered /= np.max(broadened_data_centered)
@@ -323,10 +337,7 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     r = np.linspace(2, 7, pake_data.shape[1])
 
     print(P(broadened_file).parent.joinpath("fit_output.txt"))
-    if (
-        newfit
-        or not P(broadened_file).parent.joinpath("fit_output.txt").is_file()
-    ):
+    if newfit or not P(broadened_file).parent.joinpath("fit_output.txt").is_file():
         res_params = do_fitting(
             broadened_data_centered[:, ::skip_times],
             pake_data,
@@ -336,13 +347,9 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
         )
         for key in res_params:
             res_params[key] = float(res_params[key])
-        P(broadened_file).parent.joinpath("fit_output.txt").write_text(
-            repr(res_params)
-        )
+        P(broadened_file).parent.joinpath("fit_output.txt").write_text(repr(res_params))
     else:
-        res_str = (
-            P(broadened_file).parent.joinpath("fit_output.txt").read_text()
-        )
+        res_str = P(broadened_file).parent.joinpath("fit_output.txt").read_text()
         res_params = ast.literal_eval(res_str)
 
     figr, axr = plt.subplots()
@@ -360,9 +367,7 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     axr.set_xlabel("Time (s)")
     axr.set_ylabel("Field (G)")
     figf, axf = plt.subplots()
-    out = simulate_matrix(
-        res_params, pake_data, intrinsic_data_centered[:, 0], t, r
-    )
+    out = simulate_matrix(res_params, pake_data, intrinsic_data_centered[:, 0], t, r)
     mapf = axf.imshow(
         out,  # / np.max(out),
         aspect="auto",
@@ -377,12 +382,8 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     if not P(broadened_file).parent.joinpath("fits").exists():
         P(broadened_file).parent.joinpath("fits").mkdir()
 
-    figr.savefig(
-        P(broadened_file).parent.joinpath("fits", "raw_imshow.png"), dpi=600
-    )
-    figf.savefig(
-        P(broadened_file).parent.joinpath("fits", "fit_imshow.png"), dpi=600
-    )
+    figr.savefig(P(broadened_file).parent.joinpath("fits", "raw_imshow.png"), dpi=600)
+    figf.savefig(P(broadened_file).parent.joinpath("fits", "fit_imshow.png"), dpi=600)
 
     fig_res, ax_res = plt.subplots()
     map_res = ax_res.imshow(
@@ -398,23 +399,19 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     )
     cbar.set_label("Amplitude (arb. u)", rotation=270, labelpad=15)
 
-    fig_res.savefig(
-        P(broadened_file).parent.joinpath("fits", "residue.png"), dpi=1200
-    )
+    fig_res.savefig(P(broadened_file).parent.joinpath("fits", "residue.png"), dpi=1200)
 
     figl, axl = plt.subplots()
 
     # axl.plot(broadened_data_centered[:, broadened_data_centered.shape[1] // 2])
     axl.plot(
         field_interp,
-        intrinsic_data_centered[:, 1]
-        / np.trapz(intrinsic_data_centered[:, 1]),
+        intrinsic_data_centered[:, 1] / np.trapz(intrinsic_data_centered[:, 1]),
         label="SL",
     )
     axl.plot(
         field_interp,
-        broadened_data_centered[:, 1]
-        / np.trapz(broadened_data_centered[:, 1]),
+        broadened_data_centered[:, 1] / np.trapz(broadened_data_centered[:, 1]),
         label="DL",
     )
     axl.plot(
@@ -461,9 +458,7 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     axl.set_xlabel("Field (G)")
     axl.set_ylabel("Amplitude (arb. u)")
     # axl.set_yticks([0.000, 0.005, 0.010])
-    figl.savefig(
-        P(broadened_file).parent.joinpath("fits", "slice.png"), dpi=1200
-    )
+    figl.savefig(P(broadened_file).parent.joinpath("fits", "slice.png"), dpi=1200)
     fig_unfolded, ax_unfolded = plt.subplots()
     figt, axt = plt.subplots(figsize=(3, 4))
     N = 8
@@ -536,20 +531,14 @@ def main(broadened_file, intrinsic_file, pake_patterns, newfit=False) -> None:
     #     ha="center",
     # )
     # axt.annotate("Time", (6, -1 * np.max(t) // 15 * 0.2), (6, 0))
-    figt.savefig(
-        P(broadened_file).parent.joinpath("fits", "gaussian_fits.png"), dpi=600
-    )
+    figt.savefig(P(broadened_file).parent.joinpath("fits", "gaussian_fits.png"), dpi=600)
 
     figtau, axtau = plt.subplots()
     axtau.plot(t, out[out.shape[0] // 2, :])
-    axtau.plot(
-        t, broadened_data_centered[broadened_data_centered.shape[0] // 2, :]
-    )
+    axtau.plot(t, broadened_data_centered[broadened_data_centered.shape[0] // 2, :])
     axtau.set_xlabel("Time (s)")
     axtau.set_ylabel("Peak height (au)")
-    figtau.savefig(
-        P(broadened_file).parent.joinpath("fits", "peak_heights.png"), dpi=600
-    )
+    figtau.savefig(P(broadened_file).parent.joinpath("fits", "peak_heights.png"), dpi=600)
 
     # axt.legend()
 
@@ -588,17 +577,18 @@ if __name__ == "__main__":
         broadened_f = sys.argv[1]
     except IndexError:
         broadened_f = P(basepath).joinpath(
-            "Data/2024/6/13/Buffer/283.2 K copy/106mA_23.5kHz_pre30s_on15s_off415s_25000avgs_filtered_batchDecon.feather"
+            "Data/2024/6/13/Buffer/283.2 K copy/106mA_23.5kHz_pre30s_on15s_off415s_25000avgs_filtered_batchDecon.feather",
         )
     # intrinsic_f = P(basepath).joinpath(
     #     "Data/2024/7/30/282.8 K/102mA_23.5kHz_pre30s_on10s_off410s_25000avgs_filtered_batchDecon.feather"
     # )
     intrinsic_f = P(basepath).joinpath(
         # "Data/2024/6/26/SL/283.0 K/106mA_23.5kHz_pre30s_on15s_off405s_25000avgs_filtered_batchDecon.feather"
-        "Data/2024/6/26/SL/283.0 K copy/106mA_23.5kHz_pre30s_on15s_off405s_25000avgs_filtered_batchDecon.feather"
+        "Data/2024/6/26/SL/283.0 K copy/106mA_23.5kHz_pre30s_on15s_off405s_25000avgs_filtered_batchDecon.feather",
     )
     pake_patterns = P(basepath).joinpath(
-        "Code/dipolar averaging/tumbling_pake_1-2_7-2_unlike_morebaseline_13.8ns_tcorr.txt"
+        "Code/dipolar averaging/tumbling_pake_1-2_7-2_unlike_morebaseline_13.8ns_tcorr.txt",
+        # "Code/dipolar averaging/tumbling_pake_1-2_7-2_unlike_sweep3mT_harm0_138ns_tcorr.txt"
     )
     main(broadened_f, intrinsic_f, pake_patterns, newfit=True)
     # plt.show()

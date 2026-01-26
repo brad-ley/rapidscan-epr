@@ -1,15 +1,11 @@
 import ast
-import os
 from pathlib import Path as P
-from pathlib import PurePath as PP
 
 import matplotlib.pyplot as plt
 import numpy as np
-import PIL
-from matplotlib import rc
+from filterReal import isdigit
 from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import curve_fit as cf
-from filterReal import isdigit
 
 # plt.style.use(['science'])
 # rc('text.latex', preamble=r'\usepackage{cmbright}')
@@ -69,11 +65,7 @@ def plotfits(filename, ontimes=(0, -1)):
         FIT_T = 0
 
     if P(filename).is_dir():
-        filename = [
-            ii
-            for ii in P(filename).iterdir()
-            if ii.name.endswith("_fitparams.txt")
-        ][0]
+        filename = [ii for ii in P(filename).iterdir() if ii.name.endswith("_fitparams.txt")][0]
 
     # print(P(filename).read_text())
     try:
@@ -83,23 +75,17 @@ def plotfits(filename, ontimes=(0, -1)):
                 "".join(
                     [
                         ii
-                        for ii in "".join(
-                            [ll for ll in P(bb).stem.split("_") if "t=" in ll]
-                        )
+                        for ii in "".join([ll for ll in P(bb).stem.split("_") if "t=" in ll])
                         if (isdigit(ii) or ii == ".")
-                    ]
-                )
+                    ],
+                ),
             )
             for bb in data.keys()
             if "popt" in bb
         ]
     except ValueError:
         data = ast.literal_eval(P(filename).read_text())
-        times = np.array(
-            ast.literal_eval(
-                P(filename).parent.joinpath("times.txt").read_text()
-            )
-        )
+        times = np.array(ast.literal_eval(P(filename).parent.joinpath("times.txt").read_text()))
 
     tstep = np.mean(np.diff(times))
     ts = np.insert(np.diff(times), 0, 0)
@@ -121,7 +107,7 @@ def plotfits(filename, ontimes=(0, -1)):
     try:
         # if True:
         peaksname = P(filename).parent.joinpath(
-            P(filename).stem.rstrip("fitparams.txt") + "peaks.txt"
+            P(filename).stem.rstrip("fitparams.txt") + "peaks.txt",
         )
         peaks = np.loadtxt(peaksname)
         # fits = np.c_[fits, peaks[:len(fits), 1]]
@@ -184,9 +170,7 @@ def plotfits(filename, ontimes=(0, -1)):
                     # print(select)
                     # print(ts[select], fits[:, i][select])
 
-                    if fitdict[key] == "Peak-to-peak":
-                        label = "pk2pk"
-                    elif fitdict[key] == "Raw pk2pkh":
+                    if fitdict[key] == "Peak-to-peak" or fitdict[key] == "Raw pk2pkh":
                         label = "pk2pk"
                     else:
                         # label = fitdict[key].strip('$')
@@ -228,15 +212,16 @@ def plotfits(filename, ontimes=(0, -1)):
                         c="black",
                     )
 
-                    err95 = 2 * np.sqrt(np.diag(pcov))
-                    outstr = f"offset, amplitude, time constant (s)\n{popt[0]:.4f}, {popt[1]:.4f}, {popt[2]:.4f}\n--------------------\n95% confidence\n{err95[0]:.2e}, {err95[1]:.2e}, {err95[2]:.2e}\n"
-                    P(filename).parent.joinpath("LWfit-values.txt").write_text(
-                        outstr
+                    np.savetxt(
+                        P(filename).parent.joinpath("linewidths_for_shiny.txt"),
+                        yw,
                     )
 
-                    if np.sqrt(np.diag(pcov))[-1] == 0 or np.isinf(
-                        np.sqrt(np.diag(pcov))[-1]
-                    ):
+                    err95 = 2 * np.sqrt(np.diag(pcov))
+                    outstr = f"offset, amplitude, time constant (s)\n{popt[0]:.4f}, {popt[1]:.4f}, {popt[2]:.4f}\n--------------------\n95% confidence\n{err95[0]:.2e}, {err95[1]:.2e}, {err95[2]:.2e}\n"
+                    P(filename).parent.joinpath("LWfit-values.txt").write_text(outstr)
+
+                    if np.sqrt(np.diag(pcov))[-1] == 0 or np.isinf(np.sqrt(np.diag(pcov))[-1]):
                         fitlabel = rf"$\tau_{{{label}}}={popt[2]:.1f}\pm$NaN"
                         ### LiPC ###
                         # fitlabel = rf'$\tau={popt[2]:.1f}\pm$NaN'
@@ -312,6 +297,7 @@ def plotfits(filename, ontimes=(0, -1)):
                         # label=fitlabel)
                         # label=f'$\tau={popt[-1]:.1f}\pm{np.sqrt(np.diag(pcov))[-1]:.1f}\,$s')
                         label=rf"$\tau={popt[-1]:.1f}\,$s",
+                        # label=rf"$\tau={int(popt[-1])}\,$s",
                     )
 
             except RuntimeError:
@@ -322,9 +308,7 @@ def plotfits(filename, ontimes=(0, -1)):
 
     # except IndexError:
     except ValueError:
-        print(
-            "Error in times.txt file. Averages entered to GUI must be incorrect."
-        )
+        print("Error in times.txt file. Averages entered to GUI must be incorrect.")
 
     # ax.set_ylim(top=1.25)
     # ax.set_xlim()
@@ -378,12 +362,8 @@ def plotfits(filename, ontimes=(0, -1)):
     )
     # axw.text(0.95, 0.875, "c)", transform=ax.transAxes)
     # axw.annotate("d)", (0.15, 0.875), xycoords="axes fraction")
-    figw.savefig(
-        P(filename).parent.joinpath("LWfit.png"), dpi=1200, transparent=False
-    )
-    figw.savefig(
-        P(filename).parent.joinpath("LWfit.tif"), format="tif", dpi=1200
-    )
+    figw.savefig(P(filename).parent.joinpath("LWfit.png"), dpi=1200, transparent=False)
+    figw.savefig(P(filename).parent.joinpath("LWfit.tif"), format="tif", dpi=1200)
     # plt.show()
 
 
@@ -392,16 +372,12 @@ if __name__ == "__main__":
 
     if P(filename).is_file():
         filename = [
-            ii
-            for ii in P(filename).parent.iterdir()
-            if ii.stem.endswith("combined_fitparams")
+            ii for ii in P(filename).parent.iterdir() if ii.stem.endswith("combined_fitparams")
         ][0]
     else:
-        filename = [
-            ii
-            for ii in P(filename).iterdir()
-            if ii.stem.endswith("combined_fitparams")
-        ][0]
+        filename = [ii for ii in P(filename).iterdir() if ii.stem.endswith("combined_fitparams")][
+            0
+        ]
 
     try:
         # if True:
@@ -409,16 +385,10 @@ if __name__ == "__main__":
             "".join(
                 [
                     kk
-                    for kk in "".join(
-                        [
-                            ii
-                            for ii in P(filename).stem.split("_")
-                            if "on" in ii
-                        ]
-                    )
+                    for kk in "".join([ii for ii in P(filename).stem.split("_") if "on" in ii])
                     if (isdigit(kk) or kk == ".")
-                ]
-            )
+                ],
+            ),
         )
     except ValueError:
         FIT_T = 0
