@@ -1,3 +1,8 @@
+"""
+Author: Brad Price, 2024
+"""
+
+
 import base64
 import io
 from pathlib import Path as P

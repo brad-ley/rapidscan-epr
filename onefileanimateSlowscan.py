@@ -1,3 +1,7 @@
+"""
+Author: Brad Price, 2024
+"""
+
 import ast
 import sys
 from pathlib import Path as P
@@ -428,7 +432,7 @@ if __name__ == "__main__":
     plotfields = pf + 30 * np.array([-1, 1])
 
     try:
-        phase = bool(sys.argv[3])
+        phase = bool(sys.argv[3]) # True if anything is here, False otherwise
     except IndexError:
         phase = False
 

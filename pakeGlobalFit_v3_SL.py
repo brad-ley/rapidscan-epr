@@ -352,6 +352,7 @@ def do_fitting(
 	t,
 	r,
 	checkpoint_file=None,
+	load_checkpoint=True,
 	technique="least_squares",
 ) -> dict[str, float]:
 	params = lmfit.create_params(
@@ -450,10 +451,10 @@ def do_fitting(
 	)
 
 	# vary_names = ("w1",)
-	vary_names = None
+	vary_names = ()
 
-	# Load checkpoint if exists
-	if checkpoint_file and checkpoint_file.is_file():
+	# Load checkpoint if requested and exists
+	if load_checkpoint and checkpoint_file and checkpoint_file.is_file():
 		print(f"Initial parameters: {pd.DataFrame.from_dict(params.valuesdict(), orient='index')}")
 
 		try:
@@ -461,20 +462,18 @@ def do_fitting(
 			saved_vals = ast.literal_eval(checkpoint_file.read_text())
 			for pname, pval in saved_vals.items():
 				if pname in params:
-					if params[pname].expr is not None:
-						# if params[pname].vary:
-						if pname in vary_names:
-							# If vary=True, load the value and BREAK the expression link
-							print(
-								f"Loading {pname} from checkpoint and removing constraint '{params[pname].expr}'",
-							)
-							params[pname].set(value=pval, expr=None, vary=True)
+					# Only load if the parameter is allowed to vary to respect fixed values in code
+					if params[pname].vary:
+						if params[pname].expr is not None:
+							if pname in vary_names:
+								# If vary=True and has expr, load value and BREAK the expression link
+								print(
+									f"Loading {pname} from checkpoint and removing constraint '{params[pname].expr}'",
+								)
+								params[pname].set(value=pval, expr=None, vary=True)
 						else:
-							# If vary=False, keep the expression active and do NOT load value
-							pass
-					else:
-						# No expression, just load the value
-						params[pname].set(value=pval)
+							# No expression, just load the value
+							params[pname].set(value=pval)
 		except Exception as e:
 			print(f"Failed to load checkpoint: {e}")
 
@@ -637,10 +636,7 @@ def main(
 	params_repr_path = fits_path.joinpath(".fit_params.repr")
 
 	# Define checkpoint file path
-	if use_checkpoint:
-		checkpoint_file = fits_path.joinpath(".fit_checkpoint.repr")
-	else:
-		checkpoint_file = None
+	checkpoint_file = fits_path.joinpath(".fit_checkpoint.repr")
 
 	autocorrelation(pake_data)
 
@@ -652,12 +648,14 @@ def main(
 			t,
 			r,
 			checkpoint_file=checkpoint_file,
+			load_checkpoint=use_checkpoint,
 			technique=technique,
 		)
 		res_params_dict = {}
 		for param in res_params_obj.values():
 			res_params_dict[param.name] = {
 				"value": float(param.value),
+				"stderr": float(param.stderr) if param.stderr is not None else None,
 				"vary": bool(param.vary),
 				"min": float(param.min),
 				"max": float(param.max),

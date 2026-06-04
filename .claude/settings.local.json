@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(head -5 '/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Manuscripts/2025-distances/tip4p/stride_1/gtn_sample_5000/combined_output/GTN_sample_5000_trajectory_distributions.csv')",
+      "Read(//Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Manuscripts/2025-distances/tip4p/stride_1/gtn_sample_5000/combined_output/**)",
+      "Bash(python3 -c ' *)",
+      "Bash(conda run -n base python -c ' *)",
+      "Bash(mamba run -n dash python -c ' *)",
+      "Bash(mamba run *)"
+    ]
+  }
+}

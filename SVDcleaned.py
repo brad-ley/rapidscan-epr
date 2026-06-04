@@ -1,18 +1,17 @@
 import ast
 import sys
-import pandas as pd
+import warnings
+from pathlib import Path as P
+from typing import List, Tuple
+
+import lmfit
 import matplotlib.pyplot as plt
 import numpy as np
-import pyarrow.feather as feather
-import lmfit
+import pandas as pd
 import pybroom
-import warnings
-
-from matplotlib import rc
-from pathlib import Path as P
+from pyarrow import feather
 from scipy.optimize import curve_fit
 from tqdm import tqdm
-from typing import List, Tuple
 
 if __name__ == "__main__":
     plt.style.use(["science"])
@@ -96,25 +95,25 @@ class DataSet:
         first = self.mat[self.cols[0]].to_numpy()[np.abs(B) < plotfield]
         plotcenter = B[np.where(np.abs(B) < plotfield)[0][0] + np.argmax(first)]
         plotlim = plotcenter + np.array([-plotfield, plotfield])
-        lims = np.where(np.logical_and(B >= plotlim[0], B < plotlim[1]))
+        lims = np.where(np.logical_and(plotlim[0] <= B, plotlim[1] > B))
         self.low = lims[0][0]
-        self.high = lims[0][-1]
+        self.high = lims[0][-1] + 1
         self.B = B[self.low : self.high] - plotcenter
         self.times = np.array(
-            ast.literal_eval(P(self.filename).parent.joinpath("times.txt").read_text())
+            ast.literal_eval(P(self.filename).parent.joinpath("times.txt").read_text()),
         )
 
         self.dat = self.mat[self.cols].to_numpy()[self.low : self.high, :]
 
         if "_pre" in P(self.filename).stem:
-            pre = "".join([
-                ii for ii in P(self.filename).stem.split("_") if "pre" in ii and "s" in ii
-            ])
+            pre = "".join(
+                [ii for ii in P(self.filename).stem.split("_") if "pre" in ii and "s" in ii],
+            )
             self.pre = float("".join([ii for ii in list(pre) if ii.isdigit()]))
         if "_on" in P(self.filename).stem:
-            on = "".join([
-                ii for ii in P(self.filename).stem.split("_") if "on" in ii and "s" in ii
-            ])
+            on = "".join(
+                [ii for ii in P(self.filename).stem.split("_") if "on" in ii and "s" in ii],
+            )
             self.on = float("".join([ii for ii in list(on) if ii.isdigit()]))
 
     def center(self):
@@ -126,26 +125,30 @@ class DataSet:
             tdat = self.mat[col][self.low : self.high].to_numpy()
             # n = 2**3
             n = 2**7
-            rolling = np.array([
-                (np.mean(tdat[ii - n : ii + n]) if (ii > n and len(tdat) - ii > n) else 0)
-                for ii, _ in enumerate(tdat)
-            ])
+            rolling = np.array(
+                [
+                    (np.mean(tdat[ii - n : ii + n]) if (ii > n and len(tdat) - ii > n) else 0)
+                    for ii, _ in enumerate(tdat)
+                ],
+            )
             center = np.argmax(rolling) + self.low
             if (
                 np.abs(nearcenter - center) / nearcenter < 0.2
             ):  # if there is a big variation don't bother
                 coldat = self.mat[col].to_numpy()
-                try:
-                    self.dat[:, ind] = coldat[
-                        center - int((self.high - self.low) / 2) : center
-                        + int((self.high - self.low) / 2)
-                    ]
-                except ValueError:
-                    self.dat[:, ind] = coldat[
-                        center - int((self.high - self.low) / 2) : center
-                        + int((self.high - self.low) / 2)
-                        + 1
-                    ]
+                L = self.high - self.low
+                left = center - L // 2
+                right = left + L
+                
+                # Prevent negative indices or right-side truncation out-of-bounds
+                if left < 0:
+                    left = 0
+                    right = L
+                elif right > len(coldat):
+                    right = len(coldat)
+                    left = right - L
+
+                self.dat[:, ind] = coldat[left:right]
 
         return self
 
@@ -166,25 +169,24 @@ class DataSet:
     def svd(self, k=None):
         U, E, Vh = np.linalg.svd(self.dat)
 
-        ratios = np.array([
-            E[idx] / E[idx + 1] if idx + 1 < len(E) else 0 for idx, _ in enumerate(E)
-        ])
+        ratios = np.array(
+            [E[idx] / E[idx + 1] if idx + 1 < len(E) else 0 for idx, _ in enumerate(E)],
+        )
         lim = 1.5
         if not k:
             k = np.where(ratios < lim)[0][0]  # find first time it goes below 1.5
 
         # if k == 0:
-        if k < 2:
-            k = 2
+        k = max(k, 2)
         self.k = k
 
         self.fscree, self.ascree = plt.subplots()
-        max = 10
-        self.ascree.scatter(range(1, max + 1), ratios[:max], c="k")
+        mx = 10
+        self.ascree.scatter(range(1, mx + 1), ratios[:mx], c="k")
         self.ascree.set_yscale("log")
         self.ascree.set_ylabel(r"$\sigma_{n}/\sigma_{n+1}$")
         self.ascree.set_xlabel("Component number")
-        self.ascree.set_xticks(range(1, max, 5))
+        self.ascree.set_xticks(range(1, mx, 5))
         self.ascree.axhline(lim, alpha=0.5, ls="--", c="gray")
 
         self.U = U[:, :k]
@@ -555,15 +557,17 @@ class DataSet:
 
         try:
             if naive:
-                linewidth = linewidths + np.concatenate((
-                    np.zeros(np.where(self.times > (self.pre))[0][0]),
-                    exp(
-                        self.times[self.times > (self.pre)] - (self.pre),
-                        0,
-                        ratio_to_first[0][1],
-                        taus[0],
+                linewidth = linewidths + np.concatenate(
+                    (
+                        np.zeros(np.where(self.times > (self.pre))[0][0]),
+                        exp(
+                            self.times[self.times > (self.pre)] - (self.pre),
+                            0,
+                            ratio_to_first[0][1],
+                            taus[0],
+                        ),
                     ),
-                ))
+                )
                 self.simulated = np.zeros((self.B.shape[0], self.times.shape[0]))
                 for idx, lw in enumerate(linewidth):
                     self.simulated[:, idx] = lorentzian(self.B, 0, 0, 1, lw)
@@ -576,15 +580,17 @@ class DataSet:
 
                 t_matrix = np.zeros((len(ratio_to_first), self.times.shape[0]))
                 for idx, (ratio, ratio_delta) in enumerate(ratio_to_first):
-                    t_matrix[idx, :] = ratio + np.concatenate((
-                        np.zeros(np.where(self.times > (self.pre))[0][0]),
-                        exp(
-                            self.times[self.times > (self.pre)] - (self.pre),
-                            0,
-                            ratio_delta,
-                            taus[idx],
+                    t_matrix[idx, :] = ratio + np.concatenate(
+                        (
+                            np.zeros(np.where(self.times > (self.pre))[0][0]),
+                            exp(
+                                self.times[self.times > (self.pre)] - (self.pre),
+                                0,
+                                ratio_delta,
+                                taus[idx],
+                            ),
                         ),
-                    ))
+                    )
 
                     if idx:  # make sure that it isn't the first component, then subtract the weight of the 2-nth component
                         t_matrix[0, :] -= t_matrix[idx, :]
@@ -681,12 +687,12 @@ if __name__ == "__main__":
     try:
         folder = sys.argv[1]
     except IndexError:
-        folder = "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2024/2/26/T406C"
+        folder = "/Users/Brad/Library/CloudStorage/GoogleDrive-bdprice@ucsb.edu/My Drive/Research/Data/2023/5/WT FMN (30, 31 May 23)/30/FMN sample/stable/283.8 copy"
     fnames = clean_input(folder)
     for fname in tqdm(fnames):
         try:
             main(fname)
             # plt.close()
-        except ValueError:
-            # except IndexError:
-            print(f"ERROR with file: {fname}")
+        # except ValueError as e:
+        except RuntimeError as e:
+            print(f"ERROR with file: {fname} \nError was: '{e}'")
