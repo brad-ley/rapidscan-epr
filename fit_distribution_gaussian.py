@@ -66,7 +66,7 @@ def main():
     out_df = pd.DataFrame(results).T
     out_df.index.name = "condition"
 
-    out_path = CSV_PATH.parent / (CSV_PATH.stem + "_gaussian_fits.dat")
+    out_path = CSV_PATH.parent / (CSV_PATH.stem + "_gaussian_fits.txt")
     out_df.to_csv(out_path, sep="\t")
     print(f"\nSaved to: {out_path}")
 

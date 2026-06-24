@@ -6,7 +6,8 @@
       "Bash(python3 -c ' *)",
       "Bash(conda run -n base python -c ' *)",
       "Bash(mamba run -n dash python -c ' *)",
-      "Bash(mamba run *)"
+      "Bash(mamba run *)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('pakeGlobalFit_v3.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")"
     ]
   }
 }
