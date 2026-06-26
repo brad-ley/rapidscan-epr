@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Global Kinetic EPR Fit — Notes</title>
+<script>
+  MathJax = {
+    tex: {
+      inlineMath: [['$', '$'], ['\\(', '\\)']],
+      displayMath: [['$$', '$$'], ['\\[', '\\]']],
+      tags: 'ams'
+    }
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+<style>
+  body { font-family: Georgia, serif; max-width: 960px; margin: 40px auto; padding: 0 24px; line-height: 1.75; color: #1a1a1a; }
+  h1 { font-size: 1.65em; border-bottom: 2px solid #333; padding-bottom: 8px; }
+  h2 { font-size: 1.28em; margin-top: 2.4em; border-bottom: 1px solid #bbb; padding-bottom: 5px; color: #222; }
+  h3 { font-size: 1.06em; margin-top: 1.6em; color: #444; }
+  code { background: #f3f3f3; padding: 1px 5px; border-radius: 3px; font-family: "Courier New", monospace; font-size: 0.88em; }
+  pre  { background: #f3f3f3; padding: 14px 18px; border-radius: 5px; overflow-x: auto; font-size: 0.83em; line-height: 1.55; }
+  .box  { background: #fafafa; border-left: 4px solid #777; padding: 10px 18px; margin: 1.2em 0; }
+  .warn { background: #fff8e1; border-left: 4px solid #f9a825; padding: 10px 18px; margin: 1.2em 0; }
+  .good { background: #f1f8e9; border-left: 4px solid #558b2f; padding: 10px 18px; margin: 1.2em 0; }
+  .info { background: #e8f4fd; border-left: 4px solid #1976d2; padding: 10px 18px; margin: 1.2em 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+  th, td { border: 1px solid #ccc; padding: 6px 12px; text-align: left; font-size: 0.9em; }
+  th { background: #eeeeee; }
+  ul li, ol li { margin-bottom: 0.3em; }
+  figure { margin: 1.6em 0; text-align: center; }
+  figure img { max-width: 55%; border: 1px solid #ddd; border-radius: 4px; cursor: zoom-in; transition: max-width 0.2s; }
+  figure img:active { max-width: 100%; cursor: zoom-out; }
+  figcaption { font-size: 0.88em; color: #555; margin-top: 0.5em; text-align: left; max-width: 640px; margin-left: auto; margin-right: auto; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2em; margin: 1.4em 0; max-width: 75%; margin-left: auto; margin-right: auto; }
+  .two-col figure { margin: 0; }
+  .two-col figure img { max-width: 100%; }
+</style>
+</head>
+<body>
+
+<h1>Global Kinetic EPR Fit — Code Notes</h1>
+<p><em>pakeGlobalFit_v3.py — last updated June 2026</em></p>
+
+<nav style="background:#f3f3f3;border-left:4px solid #333;padding:12px 20px;margin:1.6em 0;border-radius:4px;font-size:0.91em;line-height:2;">
+  <strong>Contents</strong>
+  <ol style="margin:0.4em 0 0 1.2em;padding:0;">
+    <li><a href="#s1">What the Data Are</a></li>
+    <li><a href="#s2">The Forward Model</a>
+      <ol style="margin:0.2em 0 0 1.2em;padding:0;list-style-type:lower-alpha;">
+        <li><a href="#s21">Kinetic mixing function</a></li>
+        <li><a href="#s22">Bimodal distance distribution</a></li>
+        <li><a href="#s23">Pake-weighted spectral profile</a></li>
+        <li><a href="#s24">Convolution with intrinsic lineshape and field shift</a></li>
+      </ol>
+    </li>
+    <li><a href="#s3">The Chi-Square Objective</a>
+      <ol style="margin:0.2em 0 0 1.2em;padding:0;list-style-type:lower-alpha;">
+        <li><a href="#s31">Field window</a></li>
+        <li><a href="#s32">Time window</a></li>
+        <li><a href="#s33">Noise estimate</a></li>
+        <li><a href="#s34">Why χ²<sub>min</sub> ≈ 0.09</a></li>
+        <li><a href="#s35">Log-normal priors and L-curve for τ<sub>prior</sub></a></li>
+      </ol>
+    </li>
+    <li><a href="#s4">Profile Likelihood Matrix</a>
+      <ol style="margin:0.2em 0 0 1.2em;padding:0;list-style-type:lower-alpha;">
+        <li><a href="#s41">Scan procedure</a></li>
+        <li><a href="#s42">Effective sample size N<sub>eff</sub></a></li>
+        <li><a href="#s43">Confidence interval threshold</a></li>
+        <li><a href="#s44">CI bound estimation</a></li>
+        <li><a href="#s45">±1σ curvature band</a></li>
+        <li><a href="#s46">Corner plot layout</a></li>
+      </ol>
+    </li>
+    <li><a href="#s5">Limitations</a></li>
+    <li><a href="#s6">Parameter Table</a></li>
+    <li><a href="#s7">Standard Analysis Workflow</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="s1">1. What the Data Are</h2>
+
+<p>The input is a 2D matrix of rapid-scan EPR absorption spectra with dimensions
+$N_\text{field} \times N_\text{time}$.
+Each column is a complete absorption-mode EPR sweep taken at one time point;
+each row traces the amplitude at a single field value over time.
+The experiment is a photo-triggered kinetic EPR measurement: a laser pulse perturbs a
+spin-labeled protein, and the EPR spectrum evolves as labeled residues transition between
+conformational states with different inter-spin distances.</p>
+
+<div class="two-col">
+  <figure>
+    <img src="img/raw_imshow.png" alt="Raw 2D EPR data matrix">
+    <figcaption><strong>Raw 2D data.</strong> Magnetic field on the vertical axis, time on the
+    horizontal axis. The EPR lineshape is visible as a bright band; the spectrum evolves
+    slowly across time as the kinetics unfold.</figcaption>
+  </figure>
+  <figure>
+    <img src="img/fit_imshow.png" alt="Fitted 2D EPR model">
+    <figcaption><strong>Best-fit model.</strong> Same axes as the raw data. Difference
+    (residuals) is shown separately below.</figcaption>
+  </figure>
+</div>
+
+<p>Three kinetically distinct time phases appear in the data:</p>
+<ol>
+  <li><strong>Pre-laser baseline</strong> ($t < t_\text{on}$) — static, no perturbation; pure intrinsic lineshape.</li>
+  <li><strong>Rising phase</strong> ($t_\text{on} \le t \le t_\text{off}$) — fraction in perturbed state grows with time constant $\tau_1$.</li>
+  <li><strong>Decaying phase</strong> ($t > t_\text{off}$) — fraction relaxes back toward baseline with time constant $\tau_2$.</li>
+</ol>
+
+<p>$t_\text{on}$ and $t_\text{off}$ are fixed by experimental design and are not fitted parameters.</p>
+
+<!-- ============================================================ -->
+<h2 id="s2">2. The Forward Model</h2>
+
+<p>The simulation is implemented across three chained functions:
+<code>alpha_heaviside_tau</code> → <code>double_gaussian</code> → <code>simulate_matrix</code>.</p>
+
+<h3 id="s21">2.1 Kinetic mixing function</h3>
+
+<p>At each time point $t_i$, <code>alpha_heaviside_tau</code> computes the instantaneous
+fraction of spin pairs in the perturbed conformation:</p>
+
+$$
+\alpha(t) = \beta + \alpha_0 \left[
+  \Theta(t - t_\text{on})\,\Theta(t_\text{off} - t)\,
+  \bigl(1 - e^{-(t - t_\text{on})/\tau_1}\bigr)
+  +
+  \bigl(1 - e^{-(t_\text{off} - t_\text{on})/\tau_1}\bigr)\,
+  \Theta(t - t_\text{off})\,
+  e^{-(t - t_\text{off})/\tau_2}
+\right]
+$$
+
+<p>where $\Theta$ is the Heaviside step. The decay amplitude starts exactly where the
+rise ended — the recovery does not assume the rise saturated to its maximum.</p>
+
+<p>$\alpha_0 = n_\text{resp}/(n_\text{resp}+1) \cdot (1 - \beta)$ is the maximum responding
+fraction. The internal optimization parameter is $n_\text{resp}$ rather than $\alpha_0$
+directly, because the natural constraint $\alpha_0 \in [0, 1)$ maps to
+$n_\text{resp} \in [0, \infty)$ — an open interior problem that the optimizer handles
+without running into a hard wall at 1. $\beta$ is the pre-existing perturbed fraction
+before the laser fires (a DC offset on $\alpha(t)$).</p>
+
+<figure>
+  <img src="img/unfolded_ratio.png" alt="Kinetic fraction vs time">
+  <figcaption><strong>Kinetic fraction $\alpha(t)$.</strong> The fitted kinetic envelope overlaid
+  on a proxy observable (e.g. spectral peak height or integrated difference signal) as a
+  function of time. The rise ($\tau_1$) and decay ($\tau_2$) are clearly visible.</figcaption>
+</figure>
+
+<h3 id="s22">2.2 Bimodal distance distribution</h3>
+
+<p><code>double_gaussian</code> evaluates the spin-pair distance distribution $P(r, t)$
+over a discrete $r$-grid at each time point:</p>
+
+$$
+P(r, t) = A \left[(1 - \alpha(t))\,\mathcal{N}(r;\, r_0, w_0) \;+\; \alpha(t)\,\mathcal{N}(r;\, r_1, w_1)\right]
+$$
+
+<p>where $\mathcal{N}(r; \mu, \sigma) = \frac{1}{\sqrt{2\pi\sigma^2}}\,e^{-(r-\mu)^2/(2\sigma^2)}$.
+When $\alpha(t) \to 0$ (pre-laser or long after recovery), spins reside near $r_0$ (one conformational state);
+when $\alpha(t) \to 1$ (at peak perturbation), spins reside near $r_1 = r_0 + \delta$
+(the other state). $P(r, t)$ has shape $(N_r, N_t)$.</p>
+
+<figure>
+  <img src="img/gaussian_fits.png" alt="Distance distribution Gaussian fits">
+  <figcaption><strong>Distance distribution $P(r)$.</strong> The bimodal Gaussian in $r$-space
+  at the best-fit parameters. The two peaks correspond to $r_0$ (near, unperturbed) and
+  $r_1 = r_0 + \delta$ (far, perturbed). Width parameters $w_0$, $w_1$ set the spread of
+  each population.</figcaption>
+</figure>
+
+<h3 id="s23">2.3 Pake-weighted spectral profile</h3>
+
+<p>The pre-computed lookup table <code>pake_data</code> has shape $(N_\text{field}, N_r)$:
+each column $K(B, r)$ is the Pake dipolar broadening function for inter-spin distance $r$.
+Marginalizing over the distance distribution gives the dipolar contribution to the spectrum:</p>
+
+$$
+S_\text{pake}(B, t) = \int P(r, t)\, K(B, r)\, dr \;\approx\; \sum_j P(r_j, t)\, K(B, r_j)\,\Delta r
+$$
+
+<p>In code: <code>pake_profiles = (pake_data @ P_r_t) * dr</code>, shape $(N_\text{field}, N_t)$.
+Multiplying by $\Delta r$ makes the discrete sum a proper quadrature approximation, so the
+amplitude $A$ is independent of the number of $r$-grid points used.</p>
+
+<h3 id="s24">2.4 Convolution with intrinsic lineshape and field shift</h3>
+
+<p>The measured EPR absorption is the convolution of the dipolar broadening pattern with the
+single-label (intrinsic) lineshape — a standard result for a powder-averaged ensemble:</p>
+
+$$
+\text{model}(B, t) = S_\text{pake}(\cdot,\, t) \;*_B\; L_\text{intrinsic}(B)
+$$
+
+<p>This is implemented via FFT along the field axis for all time points simultaneously
+(<code>rfft → multiply → irfft</code>). A rigid field shift <code>shift</code> $= n$
+is applied as a linear phase ramp in the frequency domain before the inverse FFT,
+which is differentiable and avoids interpolation artifacts:</p>
+
+$$
+\tilde{S}(k) \;\to\; \tilde{S}(k)\,e^{\,2\pi i k \cdot (n \cdot N_\text{field}/2)}
+$$
+
+<p>The result is sliced from the center of the full linear convolution output to extract
+the $N_\text{field}$-point window that aligns with the measured field axis.</p>
+
+<!-- ============================================================ -->
+<h2 id="s3">3. The Chi-Square Objective</h2>
+
+<p>The residual at each $(B_i, t_j)$ point is windowed, noise-normalized, and flattened
+before <code>lmfit</code> forms the scalar $\chi^2 = \|\mathbf{r}\|^2$:</p>
+
+$$
+r_{ij} = \frac{[\,d(B_i, t_j) - m(B_i, t_j)\,]\cdot w^\text{field}(B_i)\cdot w^\text{time}(t_j)}
+              {\sigma_\text{noise}\,\sqrt{N_\text{total}}}
+$$
+
+<p>where $N_\text{total} = N_\text{field} \times N_\text{time}$ and
+$\chi^2 = \sum_{ij} r_{ij}^2$.</p>
+
+<h3 id="s31">3.1 Field window $w^\text{field}$</h3>
+
+<p>A super-Gaussian (order 4) centered on the spectrum, tapering smoothly to zero in
+the wings where signal is negligible:</p>
+
+$$
+w^\text{field}(B) = \exp\!\left[-\tfrac{1}{2}\left(\frac{B}{\sigma_\text{field}}\right)^4\right]
+\qquad (\sigma_\text{field} = 15\,\text{G})
+$$
+
+<p>The high order (4 vs. 2 for a standard Gaussian) gives a flat top over the spectral
+region and sharper roll-off, reducing contribution from noise-only wings without a hard cutoff.</p>
+
+<h3 id="s32">3.2 Time window $w^\text{time}$</h3>
+
+<p>A double-sided exponential peaking at $t_\text{off}$ (the moment of maximum kinetic
+displacement):</p>
+
+$$
+w^\text{time}(t) = \exp\!\left(-\frac{|t - t_\text{off}|}{w}\right)
+$$
+
+<p>The width $w$ is chosen so the weight falls to 10% at $t = t_\text{max}$:</p>
+
+$$
+w = \frac{t_\text{max} - t_\text{off}}{-\ln(0.10)} \approx \frac{t_\text{max} - t_\text{off}}{2.303}
+$$
+
+<figure>
+  <img src="img/slice_windowed.png" alt="Windowed time slice">
+  <figcaption><strong>Effect of the time window.</strong> A representative field-slice
+  of the data showing the raw signal and the weighting envelope. Points near $t_\text{off}$
+  receive full weight; the pre-laser baseline and late decay are down-weighted but
+  still contribute.</figcaption>
+</figure>
+
+<h3 id="s33">3.3 Noise estimate $\sigma_\text{noise}$</h3>
+
+<p>$\sigma_\text{noise}$ is estimated from the quiet time regions only — before the laser
+fires ($t < t_\text{on}$) and well after signal has decayed ($t > t_\text{off} + 5\,\text{s}$)
+— to avoid contaminating the estimate with rapidly-changing signal near $t_\text{on}$.
+Within those columns, Gaussian-smoothing along the field axis removes the (spectrally
+smooth) EPR signal and leaves only noise:</p>
+
+$$
+\epsilon(B) = d(B, t_\text{quiet}) - \left[\text{Gauss}_{\sigma^*} \;*_B\; d(\cdot, t_\text{quiet})\right](B)
+$$
+$$
+\sigma_\text{noise} = \text{std}[\epsilon]
+$$
+
+<p>The smoothing width $\sigma^*$ is selected automatically via an L-curve. As $\sigma$
+increases, $\text{std}(d - \text{Gauss}_\sigma(d))$ rises from near zero (smooth tracks
+the noise) through a knee where the EPR signal is absorbed but noise is not, then rises
+again once $\sigma$ exceeds the EPR linewidth and signal structure leaks into the
+residual. The Menger curvature of the $(\log\sigma,\,\text{std})$ curve identifies this
+knee:</p>
+
+$$
+\sigma^* = \operatorname*{arg\,max}_\sigma \kappa(\log\sigma,\,\text{std})
+$$
+
+<figure>
+  <img src="img/noise_after_smoothing.png" alt="Noise after smooth subtraction">
+  <figcaption><strong>Smooth-subtracted noise.</strong> The result of $d - \text{Gauss}_{\sigma^*}(d)$
+  evaluated on the quiet time columns. This matrix contains only stochastic noise;
+  the spectral structure has been fully removed by the smoothing operation.</figcaption>
+</figure>
+
+<p>The smoothing width $\sigma^*$ is selected automatically each run and the diagnostic
+plot is saved as <code>noise_smooth_sigma_lcurve.png</code> in the fit output folder.
+The left panel shows std(residual) vs. $\sigma$ and the right panel shows the Menger
+curvature; the vertical red line marks $\sigma^*$. A well-chosen $\sigma^*$ sits
+clearly at the knee before the curve flattens.</p>
+
+<figure>
+  <img src="img/noise_smooth_sigma_lcurve.png" alt="Noise smoothing sigma L-curve">
+  <figcaption><strong>Auto-selected smoothing width.</strong> Left: std of smooth-subtracted
+  residual vs. Gaussian $\sigma$. Right: Menger curvature along the same curve. The red
+  vertical marks the automatically selected $\sigma^*$ at the knee — large enough to
+  remove EPR signal structure, small enough not to absorb noise.</figcaption>
+</figure>
+
+<h3 id="s34">3.4 Why $\chi^2_\text{min} \approx 0.09$ and not 1</h3>
+
+<p>The $1/\sqrt{N_\text{total}}$ factor makes $\chi^2$ a <em>mean</em> of squared
+normalized residuals rather than a sum. For independent, unit-variance data the expected
+value at the optimum would be 1. In practice:</p>
+
+$$
+\chi^2 = \frac{\sum_{ij}(w_{ij}\,\epsilon_{ij})^2}{\sigma_\text{noise}^2\,N_\text{total}}
+\approx \frac{\sigma_\text{actual}^2}{\sigma_\text{noise}^2} \cdot \overline{w^2}
+$$
+
+<p>where $w_{ij} = w^\text{field}(B_i)\cdot w^\text{time}(t_j)$ and
+$\overline{w^2} = N_\text{total}^{-1}\sum_{ij}w_{ij}^2$.
+Both windows taper substantially below 1 over most of the data
+(the time window reaches 10% at the extremes; the field window falls to zero in the wings),
+so $\overline{w^2} \ll 1$.
+With $\overline{w^2} \approx 0.09$, the minimum chi-square reflects the window geometry,
+not a miscalibrated noise estimate.
+The confidence interval threshold in Section 4.3 is derived to be invariant to this rescaling.</p>
+
+<figure>
+  <img src="img/residue.png" alt="Fit residuals">
+  <figcaption><strong>Fit residuals</strong> $d - m$ (before windowing).
+  Random noise dominates, with some residual structure from model-lineshape mismatch.
+  The mismatch is time-correlated (it follows the spectral envelope slowly over time),
+  which is why parametric methods for the correlation length use smooth-subtracted noise
+  rather than model residuals.</figcaption>
+</figure>
+
+<h3 id="s35">3.5 Log-normal soft priors and the L-curve for $\tau_\text{prior}$</h3>
+
+<p>Four parameters have log-normal priors appended as additional residual components:</p>
+
+$$
+\mathbf{r}_\text{prior} = \frac{1}{\tau_\text{prior}}\begin{pmatrix}
+\ln(w_0/w_0^\text{prior}) \\
+\ln(w_1/w_1^\text{prior}) \\
+\ln(\tau_2/\tau_2^\text{prior}) \\
+\ln(\beta/\beta^\text{prior})
+\end{pmatrix}
+$$
+
+<p>These are concatenated onto the data residual vector. In the residual <em>vector</em>
+each prior element is $O(1/\tau_\text{prior})$ when a parameter deviates by one e-fold —
+much larger than any individual data residual element, which is $O(1/\sqrt{N_\text{total}})$.
+However, $\chi^2$ sums all squared elements, and there are only 4 prior terms versus
+$N_\text{total} \sim 10^4$ data terms. So in $\chi^2$ terms:</p>
+
+$$
+\chi^2_\text{data} = \sum_{ij} r_{ij}^2 \sim O(0.09) \qquad \text{(at optimum)}
+$$
+$$
+\chi^2_\text{prior} = \sum_{l=1}^{4} r_{\text{prior},l}^2 \sim O\!\left(\frac{4}{\tau_\text{prior}^2}\right)
+\approx 0.28 \quad \text{when each param is 1 e-fold from its prior}
+$$
+
+<p>The prior contribution is therefore <em>comparable in scale</em> to the data chi-square —
+intentionally so. It is strong enough to prevent degenerate solutions for parameters
+the data is insensitive to (especially $w_0$, $w_1$ at large $r$), but it does not
+overwhelm the data: at the optimum the parameters sit near their prior centers and the
+prior contribution is near zero. The prior only exerts meaningful force when a parameter
+drifts significantly from a physically reasonable value.</p>
+
+<p><strong>Choosing $\tau_\text{prior}$</strong> — the value 3.8 was selected using an
+<strong>L-curve analysis</strong>: the optimizer scanned $\tau_\text{prior}$ over a
+grid and recorded both the data chi-square and the summed prior deviation at each
+value. Plotting prior deviation vs. data chi-square traces an L-shaped curve; the
+corner of the L is the point of maximum curvature, representing the best balance
+between data fidelity and prior constraint.</p>
+
+<figure>
+  <img src="img/lcurve_tau_prior.png" alt="L-curve for tau_prior selection">
+  <figcaption><strong>L-curve for $\tau_\text{prior}$.</strong>
+  Left panel: data $\chi^2$ vs. all-prior deviation (log–log). The corner of the L marks
+  the optimal regularization strength. Middle panel: same for widths $w_0$, $w_1$ only.
+  Right panel: Menger curvature along the L-curve as a function of $\tau_\text{prior}$;
+  the peak identifies the corner. The chosen value $\tau_\text{prior} = 3.8$ (orange marker)
+  sits at the L-curve corner.</figcaption>
+</figure>
+
+<!-- ============================================================ -->
+<h2 id="s4">4. Profile Likelihood Matrix</h2>
+
+<p>The profile likelihood matrix is a corner plot showing (a) how $\chi^2$ changes as
+each free parameter is forced away from its optimum (diagonal panels), and (b) how all
+other parameters co-vary in response (off-diagonal panels). It is the primary tool for
+assessing parameter identifiability and inter-parameter correlations.</p>
+
+<figure>
+  <img src="img/profile_likelihood_matrix.png" alt="Profile likelihood matrix corner plot">
+  <figcaption><strong>Profile likelihood matrix.</strong> Diagonal panels: $\chi^2$ profile
+  vs. that parameter. Red dashed line = 95% CI threshold; red verticals = CI bounds
+  (annotated as "off-plot" if outside the scan range); blue shading = $\pm1\sigma$ band (rescaled Wilks, $\Delta\chi^2 = \chi^2_\text{min}/N_\text{eff}$). Off-diagonal panels: co-variation traces (see Section 4.5).</figcaption>
+</figure>
+
+<h3 id="s41">4.1 Scan procedure</h3>
+
+<ol>
+  <li>Start from the LSQ best-fit parameter vector $\hat{\theta}$.</li>
+  <li>For each free parameter $\theta_k$, construct a scan grid over its allowed
+    bounds — log-spaced if $\theta_k^\text{max}/\theta_k^\text{min} > 20$ with
+    $\theta_k^\text{min} > 0$ (applies to $n_\text{resp}$, $\tau_1$, $\tau_2$,
+    linewidths), linear otherwise. 15–20 points per parameter.</li>
+  <li><strong>Bi-directional scan:</strong> scan outward from $\hat{\theta}_k$ in
+    both directions separately. The previous step's fitted parameters seed the next
+    step's optimizer, so each solve starts only one small move from a good solution
+    and avoids being trapped after crossing a high-$\chi^2$ barrier.</li>
+  <li>At each scan point: fix $\theta_k$, free all other parameters, run
+    <code>lmfit.minimize</code> (Trust Region Reflective via SciPy <code>least_squares</code>, handles bounds natively). Record $\chi^2$
+    and all co-parameter values.</li>
+</ol>
+
+<p>$r_1 = r_0 + \delta$ is not scanned independently — its profile is read from
+the $\delta$ scan by recording the implied $r_1$ at each step after $r_0$ has
+co-varied freely. $n_\text{resp}$ is scanned internally but all plots display
+$\alpha_0 = n_\text{resp}/(n_\text{resp}+1)\cdot(1-\beta)$.</p>
+
+<h3 id="s42">4.2 Effective sample size $N_\text{eff}$</h3>
+
+<p>Adjacent field points are correlated because the EPR lineshape is broad relative to
+the field step size. We estimate $N_\text{eff,field}$ from the autocorrelation function
+(ACF) of the smooth-subtracted noise along the field axis. For each time column,
+compute $\epsilon_j(B) = d(B,t_j) - \text{Gauss}[d(\cdot,t_j)](B)$ and its normalized ACF
+$\bar{\rho}(\ell)$ averaged over all time columns. Truncate at the first zero crossing
+to avoid negative-lobe bias:</p>
+
+$$
+N_\text{eff,field} = \frac{N_\text{field}}{1 + 2\displaystyle\sum_{\ell=1}^{\ell^*} \bar{\rho}(\ell)}
+$$
+
+<p>We use smooth-subtracted noise (not model residuals) because model residuals contain
+systematic mismatch structure that shortens the apparent ACF and would underestimate
+$N_\text{eff}$.</p>
+
+<p>On the time axis, only three kinetically independent observations exist:
+pre-laser baseline, rising phase ($\tau_1$), and decaying phase ($\tau_2$).
+$t_\text{on}$ and $t_\text{off}$ are fixed, not estimated from the data.
+Hence:</p>
+
+$$
+N_\text{eff} = N_\text{eff,field} \times 3 \;\approx\; 52
+$$
+
+<h3 id="s43">4.3 Confidence interval threshold</h3>
+
+<p>Wilks' theorem: for a <em>sum</em> chi-square with independent unit-variance data,
+the 95% CI boundary satisfies $\Delta\chi^2_\text{sum} = 3.84$.
+Our chi-square is a <em>mean</em>, $\chi^2 = \chi^2_\text{sum}/N_\text{total}$,
+and the data are correlated with $N_\text{eff}$ effective independent observations.
+Translating Wilks to our units:</p>
+
+$$
+\Delta\chi^2 = \frac{3.84}{N_\text{eff}}
+$$
+
+<p>But as shown in Section 3.4, $\chi^2_\text{min} \approx \overline{w^2} \ne 1$
+due to window weighting. Both $\chi^2_\text{min}$ and any profile variation
+$\Delta\chi^2$ scale by the same factor $\overline{w^2}$, so the threshold
+must be rescaled by the same amount to live in the same amplitude as the profile.
+Since $\chi^2_\text{min}$ directly measures $\overline{w^2}$, the correct threshold is:</p>
+
+$$
+\boxed{\Delta\chi^2_\text{threshold} = 3.84 \times \frac{\chi^2_\text{min}}{N_\text{eff}}}
+$$
+
+<p>Equivalently: the invariant statement is the <em>fractional</em> rise in chi-square,
+$\Delta\chi^2 / \chi^2_\text{min} = 3.84 / N_\text{eff}$.
+This form is also correct when $\sigma_\text{noise}$ is mis-estimated by a constant
+factor, because such an error scales both $\chi^2_\text{min}$ and $\Delta\chi^2_\text{profile}$
+identically, leaving their ratio unchanged.</p>
+
+<h3 id="s44">4.4 CI bound estimation</h3>
+
+<p>For each diagonal profile, CI bounds are found in two stages:</p>
+
+<ol>
+  <li><strong>Direct interpolation:</strong> if two adjacent scan points straddle the
+    threshold $\chi^2_\text{min} + \Delta\chi^2_\text{threshold}$, linearly interpolate
+    the exact crossing. Most reliable when the threshold is crossed within the scan range.</li>
+  <li><strong>Parabola extrapolation:</strong> if the threshold is not crossed within
+    the scan range, fit a parabola $\chi^2(\theta) = a(\theta - \theta^*)^2 + \chi^2_\text{min}$
+    to the 12 lowest-$\chi^2$ scan points and solve analytically:
+    $\theta^* \pm \sqrt{\Delta\chi^2_\text{threshold}/a}$.
+    Valid when the profile is approximately quadratic near the minimum.</li>
+</ol>
+
+<p>Fitting is done in $\log_{10}(\theta)$ space for log-spaced parameters to symmetrize
+the parabola. Extrapolated bounds are clipped if they lie more than 1000× outside the
+scan range, and noted as "off-plot" if they fall outside the plotted x-range.</p>
+
+<h3 id="s45">4.5 The $\pm 1\sigma$ curvature band</h3>
+
+<p>The parabola fit also gives the local curvature $a$. Using the same relative Wilks
+scaling as the 95% CI, the $\pm1\sigma$ threshold is
+$$\Delta\chi^2_{1\sigma} = \frac{\chi^2_\text{min}}{N_\text{eff}}$$
+(the 68.3% quantile of $\chi^2(1)$ is 1, so this is exactly the 95% threshold divided by
+3.84). The band is $\theta^* \pm \sqrt{\Delta\chi^2_{1\sigma}/a}$ and is shown as blue
+shading on diagonal panels. Using the raw $\Delta\chi^2 = 1$ threshold (the textbook
+Wilks value for a properly normalised $\chi^2$) would be incorrect here because
+$\chi^2_\text{min}/N_\text{eff} \ll 1$ due to the field and time window weighting — it
+would produce a band far wider than the 95% CI. The rescaled threshold keeps the
+$\pm1\sigma$ band consistently narrower than the 95% CI. If the two are comparable in
+width the profile is nearly parabolic and the Wilks approximation is reliable; if the
+profile is very flat both will be wide.</p>
+
+<h3 id="s46">4.6 Corner plot layout</h3>
+
+<table>
+  <tr><th>Panel</th><th>What is shown</th></tr>
+  <tr><td>Diagonal</td><td>$\chi^2$ vs. that parameter. Gray dashed = LSQ value.
+    Red dashed = threshold. Red vertical = CI bounds (or "off-plot" annotation).
+    Blue shading = $\pm1\sigma$ curvature band.</td></tr>
+  <tr><td>Lower triangle — blue trace</td><td>Value of the <em>column</em> parameter
+    as it co-varies freely while the <em>row</em> parameter is being scanned
+    (row param fixed).</td></tr>
+  <tr><td>Lower triangle — orange trace</td><td>Value of the <em>row</em> parameter
+    as it co-varies freely while the <em>column</em> parameter is being scanned
+    (column param fixed).</td></tr>
+  <tr><td>Red dot</td><td>LSQ best-fit value on each off-diagonal panel.</td></tr>
+</table>
+
+<p>Two traces in each off-diagonal cell because either parameter can play the role of
+"fixed": swapping which is fixed can reveal asymmetries in the chi-square landscape.
+If the two traces are identical, the correlation is symmetric. If they diverge, it
+suggests a ridge or multiple valleys in the joint landscape.</p>
+
+<!-- ============================================================ -->
+<h2 id="s5">5. Limitations</h2>
+
+<div class="warn">
+<p><strong>$N_\text{eff}$ uncertainty:</strong> The effective sample size is estimated,
+not exact. Sources of error include:</p>
+<ul>
+  <li>Smooth width choice (1.5 G) for noise extraction — factor-of-2 change alters the ACF shape.</li>
+  <li>ACF truncation at first zero crossing is a heuristic; slow oscillations can cause premature truncation.</li>
+  <li>$N_\text{eff,time} = 3$ is a physical argument, not measured.</li>
+</ul>
+<p>Rough uncertainty in $N_\text{eff}$: a factor of 2–3×, propagating directly to CI width.
+The $\pm1\sigma$ curvature band (Section 4.5) uses the same relative scaling as the 95%
+CI and so carries the same $N_\text{eff}$ uncertainty, but its width relative to the CI
+is a useful check on profile parabolicity.</p>
+</div>
+
+<div class="info">
+<p><strong>Model mismatch:</strong> The fit residuals contain both random noise and
+systematic model-mismatch structure (visible as faint spectral features in the residuals
+that co-vary with the signal). Chi-square at the optimum therefore has two contributions:
+$\chi^2_\text{min} = \chi^2_\text{noise} + \chi^2_\text{mismatch}$.
+The profile likelihood CI inherits both — it describes the set of parameter values
+consistent with the data given both the noise level <em>and</em> the model's
+inability to perfectly describe the lineshape. This makes the CIs conservatively wide,
+which is the honest interpretation when the model is not perfect.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="s6">6. Parameter Table</h2>
+
+<table>
+  <tr><th>Parameter</th><th>Varied?</th><th>Prior?</th><th>Meaning and notes</th></tr>
+  <tr><td>$A$</td><td>Yes</td><td>—</td>
+    <td>Overall amplitude scale. Absorbs normalization differences between experiment
+      and reference spectra.</td></tr>
+  <tr><td>$\tau_1$</td><td>Yes</td><td>—</td>
+    <td>Rise time constant (s). Log-spaced scan.</td></tr>
+  <tr><td>$\tau_2$</td><td>Yes</td><td>Log-normal</td>
+    <td>Decay time constant (s). Prior center from prior knowledge of the relaxation rate.</td></tr>
+  <tr><td>$n_\text{resp}$</td><td>Yes (internal)</td><td>—</td>
+    <td>Responding population weight: $\alpha_0 = n_\text{resp}/(n_\text{resp}+1)\cdot(1-\beta)$.
+      Displayed as $\alpha$ in the profile matrix. Log-spaced scan.</td></tr>
+  <tr><td>$\beta$</td><td>Yes</td><td>Log-normal</td>
+    <td>Pre-existing fraction in perturbed state before laser fires. DC offset on $\alpha(t)$.</td></tr>
+  <tr><td>$r_0$</td><td>Yes</td><td>—</td>
+    <td>Near inter-spin distance (nm). Determines the width of the inner Pake shoulders.</td></tr>
+  <tr><td>$\delta$</td><td>Yes</td><td>—</td>
+    <td>Distance spread (nm): $r_1 = r_0 + \delta$.</td></tr>
+  <tr><td>$w_0$</td><td>Yes</td><td>Log-normal</td>
+    <td>Gaussian width of the near-distance peak in $P(r)$ (nm).</td></tr>
+  <tr><td>$w_1$</td><td>Yes</td><td>Log-normal</td>
+    <td>Gaussian width of the far-distance peak in $P(r)$ (nm).</td></tr>
+  <tr><td>shift</td><td>Yes</td><td>—</td>
+    <td>Rigid field shift (in units of half-field-range). Applied as a frequency-domain
+      phase ramp for differentiability.</td></tr>
+  <tr><td>$t_\text{on},\, t_\text{off}$</td><td>No</td><td>—</td>
+    <td>Laser on/off times; fixed by experimental design.</td></tr>
+  <tr><td>$\alpha,\, r_1$</td><td>Derived</td><td>—</td>
+    <td>$\alpha = n_\text{resp}/(n_\text{resp}+1)\cdot(1-\beta)$; $r_1 = r_0 + \delta$.
+      Displayed in profile matrix for interpretability.</td></tr>
+</table>
+
+<div class="warn">
+<p><strong>Sensitivity to $r$:</strong> Dipolar coupling scales as $1/r^3$.
+For $r \gtrsim 3.5\,\text{nm}$ the Pake splitting is smaller than the intrinsic linewidth
+and becomes unresolvable. The far distance $r_1$ is poorly constrained when it is large,
+and the profile likelihood correctly shows an open upper bound on $\delta$.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="s7">7. Standard Analysis Workflow</h2>
+
+<p>A step-by-step guide for fitting a new dataset from scratch.</p>
+
+<h3>Step 1 — Fast exploratory fit</h3>
+<div class="box">
+<p>Set flags at the top of the script:</p>
+<pre>REDUCE_COMPUTATION_SPEEDUP = True   # coarse r-grid, fewer field/time points
+RUN_PROFILE_MATRIX = False
+PROFILE_LIKELIHOOD = False</pre>
+<p>Run the script. This executes basinhopping followed by a local LSQ polish and saves
+results to the <code>LSQ_fast/</code> subfolder. The goal is a reasonable starting
+parameter set, not a publication-quality fit. Check <code>raw_imshow.png</code> vs
+<code>fit_imshow.png</code> and <code>residue.png</code> to verify the fit is plausible.
+Also inspect <code>noise_smooth_sigma_lcurve.png</code> to confirm the auto-selected
+smoothing $\sigma^*$ sits at a sensible knee.</p>
+</div>
+
+<h3>Step 2 — Calibrate $\tau_\text{prior}$ via L-curve</h3>
+<div class="box">
+<p>Set flags:</p>
+<pre>REDUCE_COMPUTATION_SPEEDUP = True   # fast is fine for this scan
+PROFILE_LIKELIHOOD = True           # runs the tau_prior L-curve scan</pre>
+<p>The script scans <code>tau_prior</code> over a log-spaced range and plots two things:
+(a) the L-curve of $\chi^2_\text{data}$ vs. prior deviation, and (b) the Menger
+curvature along it. The corner of maximum curvature is the optimal $\tau_\text{prior}$
+— strong enough to prevent degeneracy, weak enough not to dominate the data fit.
+Read the printed value and set:</p>
+<pre>TAU_PRIOR = 3.8   # (or whatever the corner gives)</pre>
+<p>in the flags block. This value is dataset-specific and should be re-derived for
+each new sample if SNR or linewidth constraints differ significantly.</p>
+</div>
+
+<h3>Step 3 — Production fit at full resolution</h3>
+<div class="box">
+<p>Set flags:</p>
+<pre>REDUCE_COMPUTATION_SPEEDUP = False  # full r-grid, full field/time resolution
+PROFILE_LIKELIHOOD = False
+RUN_PROFILE_MATRIX = False</pre>
+<p>Run the script. Basinhopping explores the landscape at full resolution, then LSQ
+polishes the result. Output goes to <code>LSQ/</code>. This run also saves
+<code>noise_smooth_sigma_lcurve.png</code> in <code>LSQ/</code> — verify $\sigma^*$ is
+consistent with the fast run. If the fit residuals look good, proceed.</p>
+
+<div class="warn"><strong>If the profile matrix later reports LSQ outside a CI</strong>
+(i.e. the scan found a lower $\chi^2$ than the stored LSQ), the code prints a
+<code>!!!</code> warning and saves an improved seed. Set
+<code>REFINE_FROM_SEED = True</code> and re-run once to refine the LSQ from that seed
+without basinhopping, then reset to <code>False</code>.</div>
+</div>
+
+<h3>Step 4 — Profile likelihood matrix for confidence intervals</h3>
+<div class="box">
+<p>Set flags:</p>
+<pre>REDUCE_COMPUTATION_SPEEDUP = False  # profile scan uses full resolution
+RUN_PROFILE_MATRIX = True</pre>
+<p>The script loads the saved LSQ result and scans each free parameter
+bi-directionally. At each scan point it fixes that parameter and re-optimises all
+others (Trust Region Reflective, 20 points per parameter). Results are saved to
+<code>profile_matrix_scans.txt</code> and <code>profile_likelihood_matrix.png</code>.</p>
+
+<p>Check the corner plot:</p>
+<ul>
+  <li>Each diagonal should show a clear $\chi^2$ minimum near the red dot (LSQ value).
+      If the minimum is shifted, the LSQ may be in a local basin — see the warning
+      above.</li>
+  <li>Open bounds (<code>&lt;scan_min</code> / <code>&gt;scan_max</code>) are physically
+      meaningful for parameters that hit a hard floor (e.g. $\tau_1 \to 0$) or have a
+      flat profile on one side (e.g. large $n_\text{resp}$).</li>
+  <li>The $\pm1\sigma$ blue band should be narrower than the 95% CI red lines. If they
+      are similar width the profile is parabolic and the Gaussian approximation is
+      reliable. Wide separation indicates asymmetry or non-parabolic behaviour.</li>
+</ul>
+
+<p>Report the printed CI table. For derived quantity $r_1 = r_0 + \delta$, the CI is
+computed from the joint $(\delta, r_0)$ profile (not the sum of individual CIs), so it
+is correctly narrower than naive error propagation.</p>
+</div>
+
+<h3>Quick flag reference</h3>
+<table>
+  <tr><th>Flag</th><th>Effect</th></tr>
+  <tr><td><code>REDUCE_COMPUTATION_SPEEDUP</code></td><td>Coarser grids for speed (steps 1–2); always <code>False</code> for production</td></tr>
+  <tr><td><code>PROFILE_LIKELIHOOD</code></td><td>Runs 1D tau_prior / alpha / delta L-curve scans (step 2)</td></tr>
+  <tr><td><code>RUN_PROFILE_MATRIX</code></td><td>Runs full corner-plot CI scan over all free parameters (step 4)</td></tr>
+  <tr><td><code>REFINE_FROM_SEED</code></td><td>Skip basinhopping; polish LSQ from saved seed (use after <code>!!!</code> warning)</td></tr>
+  <tr><td><code>TAU_PRIOR</code></td><td>Prior strength from L-curve corner; re-derive per dataset</td></tr>
+  <tr><td><code>N414Q</code></td><td>Dataset toggle — controls <code>t_off</code> default and data path</td></tr>
+</table>
+
+</body>
+</html>

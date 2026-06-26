@@ -7,7 +7,25 @@
       "Bash(conda run -n base python -c ' *)",
       "Bash(mamba run -n dash python -c ' *)",
       "Bash(mamba run *)",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('pakeGlobalFit_v3.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('pakeGlobalFit_v3.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(git -C /Users/Brad/Documents/Research/Code/python/rapidscan log --oneline --since=\"2025-01-01\" --until=\"2025-03-01\")",
+      "Bash(git -C /Users/Brad/Documents/Research/Code/python/rapidscan log --oneline --since=\"2025-01-01\")",
+      "Bash(git -C /Users/Brad/Documents/Research/Code/python/rapidscan show 45458ad --stat)",
+      "Bash(git -C /Users/Brad/Documents/Research/Code/python/rapidscan log --format=\"%H %ai %s\" 45458ad 1cdd032)",
+      "Bash(git -C /Users/Brad/Documents/Research/Code/python/rapidscan log --oneline -- pakeGlobalFit_v3.py)",
+      "Bash(git -C /Users/Brad/Documents/Research/Code/python/rapidscan show 20b784e:pakeGlobalFit_v3.py)",
+      "Bash(awk 'NR>=1 && /^\\(11[0-9]{2}|1[2-9][0-9]{2}\\):/')",
+      "Bash(awk -F: '$2+0 >= 860 && $2+0 <= 1200')",
+      "Bash(awk -F: 'int\\($1\\) >= 860 && int\\($1\\) <= 1200')",
+      "Bash(find /Users/Brad/Documents/Research -name \"*.png\" -path \"*/fits/*\" 2>/dev/null | head -30)",
+      "Read(//Users/Brad/Documents/Research/**)",
+      "Bash(find /Users/Brad/Documents/Research -name \"profile_likelihood_matrix.png\" 2>/dev/null)",
+      "Read(//Users/Brad/**)",
+      "Bash(cp '/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Data/2023/5/WT FMN \\(30, 31 May 23\\)/31/FMN sample/stable copy/291.3/fits/raw_imshow.png' /Users/Brad/Documents/Research/Code/python/rapidscan/notes/img/raw_imshow.png)",
+      "Bash(cp '/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Data/2023/5/WT FMN \\(30, 31 May 23\\)/31/FMN sample/stable copy/291.3/fits/fit_imshow.png' /Users/Brad/Documents/Research/Code/python/rapidscan/notes/img/fit_imshow.png)",
+      "Bash(cp '/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Data/2023/5/WT FMN \\(30, 31 May 23\\)/31/FMN sample/stable copy/291.3/fits/residue.png' /Users/Brad/Documents/Research/Code/python/rapidscan/notes/img/residue.png)",
+      "Bash(cp '/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Data/2023/5/WT FMN \\(30, 31 May 23\\)/31/FMN sample/stable copy/291.3/fits/noise_after_smoothing.png' /Users/Brad/Documents/Research/Code/python/rapidscan/notes/img/noise_after_smoothing.png)",
+      "Bash(cp '/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Data/2023/5/WT FMN \\(30, 31 May 23\\)/31/FMN sample/stable copy/291.3/fits/lcurve_tau_prior.png' /Users/Brad/Documents/Research/Code/python/rapidscan/notes/img/lcurve_tau_prior.png)"
     ]
   }
 }
