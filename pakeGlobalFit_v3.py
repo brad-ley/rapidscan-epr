@@ -16,7 +16,7 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
-N414Q = True
+N414Q = False
 SKIP_TO_EMCEE = False  # set True to skip basinhopping+lsq and go straight to emcee
 RUN_EMCEE = False       # set False to skip emcee and plot using saved LSQ params
 LONG_EMCEE = False      # set True to run a long emcee run (default is short test values)
@@ -24,10 +24,10 @@ REPLOT_FROM_COMPARISON = False  # set True to skip all fitting and regenerate pl
 PROFILE_LIKELIHOOD = False  # set True to run profile likelihood scan over alpha_frac and delta
 REDUCE_COMPUTATION_SPEEDUP = False  # set True to use reduced r-grid/field/time resolution for basinhopping and LSQ as well
 RUN_BOOTSTRAP = False  # set True to run residual block bootstrap for realistic parameter uncertainties
-RUN_MULTISTART = False   # set True to run multistart landscape diagnostic (random restarts, same data)
-RUN_PROFILE_MATRIX = False  # set True to run profile likelihood matrix / corner plot
+RUN_MULTISTART = False   # set True to run multistart /landscape diagnostic (random restarts, same data)
+RUN_PROFILE_MATRIX = True  # set True to run profile likelihood matrix / corner plot
 REFINE_FROM_SEED = False    # set True to skip basinhopping and refine LSQ from saved .fit_params_lsq.repr seed
-TAU_PRIOR = 2.1 if N414Q else 3.8
+TAU_PRIOR = 1.5 if N414Q else 1.5
 
 if __name__ == "__main__":
     plt.style.use(["science"])
