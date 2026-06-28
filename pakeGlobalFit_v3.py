@@ -16,8 +16,8 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
-N414Q = False
-SKIP_TO_EMCEE = False  # set True to skip basinhopping+lsq and go straight to emcee
+N414Q = True
+SKIP_TO_EMCEE = True  # set True to skip basinhopping+lsq and go straight to emcee
 RUN_EMCEE = False       # set False to skip emcee and plot using saved LSQ params
 LONG_EMCEE = False      # set True to run a long emcee run (default is short test values)
 REPLOT_FROM_COMPARISON = False  # set True to skip all fitting and regenerate plots from emcee_comparison.txt
@@ -290,19 +290,18 @@ def estimate_sigma_noise(data, field, field_smooth_sigma=None, t=None, t_on=None
     field_spacing = float(field[-1] - field[0]) / (len(field) - 1)
     sigma_pts = max(field_smooth_sigma / field_spacing, 0.5)
     smooth = gaussian_filter1d(data, sigma=sigma_pts, axis=0)
-    return float(np.std(data - smooth))
+    noise_2d = data - smooth
+    return float(np.std(noise_2d)), noise_2d, float(field_smooth_sigma)
 
 
-def estimate_n_eff(data_2d, field=None, field_smooth_sigma=1.5, n_time_independent=3):
+def estimate_n_eff(data_2d, field=None, field_smooth_sigma=1.5, n_time_independent=3,
+                   save_path=None):
     """Estimate effective sample size from field-axis noise autocorrelation.
 
-    Uses data - Gaussian_smooth(data) as the noise estimate along the field axis.
-    This is model-independent and measures the actual spectral noise correlation
-    rather than model-mismatch structure, which would give an artificially short
-    ACF and underestimate N_eff when model residuals are used.
-
-    The time axis has 3 independent kinetic phases: pre-laser baseline, rising phase
-    (tau_1), and decaying phase (tau_2).  t_on/t_off are fixed by design.
+    Subtracts a 1D Gaussian smooth along the field axis to isolate noise, then
+    averages the field-axis ACF over all time slices. Uses the full dataset since
+    the field-axis correlation length is a spectrometer property independent of
+    whether EPR signal is present.
 
     N_eff = N_eff_field * n_time_independent
     """
@@ -312,11 +311,14 @@ def estimate_n_eff(data_2d, field=None, field_smooth_sigma=1.5, n_time_independe
     if field is not None:
         field_arr = np.asarray(field)
         field_range = float(field_arr[-1] - field_arr[0])
-        sigma_pts = field_smooth_sigma / (field_range / (n_field - 1))
+        field_spacing = field_range / (n_field - 1)
+        sigma_pts = field_smooth_sigma / field_spacing
     else:
+        field_spacing = 1.0
         sigma_pts = n_field * 0.03
 
     noise_2d = data_2d - gaussian_filter1d(data_2d, sigma=sigma_pts, axis=0)
+    n_field, n_time = noise_2d.shape
 
     acf_mean = np.zeros(n_field)
     n_valid = 0
@@ -338,6 +340,30 @@ def estimate_n_eff(data_2d, field=None, field_smooth_sigma=1.5, n_time_independe
     rho_sum = 1.0 + 2.0 * acf_mean[1:cutoff].sum()
     n_eff_field = n_field / rho_sum
     n_eff_total = n_eff_field * n_time_independent
+
+    if save_path is not None:
+        lags = np.arange(n_field) * field_spacing
+        fig, ax = plt.subplots()
+        ax.plot(lags, acf_mean, color="k", linewidth=1.5, label="Mean ACF")
+        ax.axhline(0, color="gray", linewidth=0.8, linestyle="--")
+        ax.axvline(cutoff * field_spacing, color="C1", linewidth=1.2, linestyle="--",
+                   label=f"Zero-crossing $k_0$ = {cutoff * field_spacing:.2g} G")
+        ax.fill_between(lags[1:cutoff], acf_mean[1:cutoff], 0,
+                        alpha=0.2, color="C0", label=r"Sum region ($\hat{\rho}_k$)")
+        ax.set_xlabel("Lag (G)")
+        ax.set_ylabel(r"$\hat{\rho}_k$")
+        ax.set_xlim(0, min(lags[-1], cutoff * field_spacing * 5))
+        ax.legend(handlelength=0.75, labelspacing=0.25, fontsize=10)
+        ax.text(0.97, 0.95,
+                f"$N_{{\\rm eff,field}}$ = {n_eff_field:.1f}\n"
+                f"$N_{{\\rm eff}}$ = {n_eff_total:.1f}  ($\\times${n_time_independent})",
+                transform=ax.transAxes, ha="right", va="top", fontsize=10,
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", edgecolor="#aaa"))
+        fig.tight_layout()
+        fig.savefig(save_path, dpi=200)
+        plt.close(fig)
+        print(f"  Saved ACF plot to {save_path}")
+
     return float(n_eff_total), float(n_eff_field), acf_mean
 
 
@@ -376,7 +402,8 @@ def fit_function(
     # exp(-(t_max - t_off) / width) = 0.10  => -(t_max - t_off) / width = ln(0.10)
     # width = (t_max - t_off) / -ln(0.10) approx (t_max - t_off) / 2.3
     t_max = np.max(t)
-    width = (t_max - t_off_val) / -np.log(10 / 100)
+    _w_end = 10 / 100  # weight at t_max (10%)
+    width = (t_max - t_off_val) / -np.log(_w_end)
 
     # Exponential function peaking at t_off
     time_weights = np.exp(-np.abs(t - t_off_val) / width)
@@ -488,67 +515,6 @@ def simulate_matrix(params, pake_data, intrinsic_lineshape, t, r):
     return matrix
 
 
-def autocorrelation(data):
-    import numpy as np
-    from numpy.fft import fft2, fftshift, ifft2
-    from scipy.optimize import curve_fit
-
-    # -----------------------------
-    # 1. Subtract the mean
-    # -----------------------------
-    data_zero_mean = data - np.mean(data)
-
-    # -----------------------------
-    # 2. Compute 2D autocorrelation
-    # -----------------------------
-    acf2d = fftshift(ifft2(np.abs(fft2(data_zero_mean)) ** 2).real)
-    acf2d /= acf2d.max()  # normalize to 1 at zero lag
-
-    # -----------------------------
-    # 3. Radially average the 2D ACF
-    # -----------------------------
-    def radial_profile(acf):
-        y, x = np.indices(acf.shape)
-        center = np.array(acf.shape) // 2
-        r = np.sqrt((x - center[1]) ** 2 + (y - center[0]) ** 2)
-        r = r.astype(np.int64)
-        tbin = np.bincount(r.ravel(), acf.ravel())
-        nr = np.bincount(r.ravel())
-        radial_acf = tbin / nr
-        return radial_acf
-
-    radial_acf = radial_profile(acf2d)
-    r_values = np.arange(len(radial_acf))
-
-    # -----------------------------
-    # 4. Fit to Gaussian to extract correlation length
-    # -----------------------------
-    def gaussian(r, sigma):
-        return np.exp(-(r**2) / (2 * sigma**2))
-
-    # Fit only the first part of the ACF (before it becomes noisy)
-    fit_range = int(len(radial_acf) / 4)  # use first quarter of data
-    popt, _ = curve_fit(gaussian, r_values[:fit_range], radial_acf[:fit_range])
-    sigma = popt[0]
-
-    # -----------------------------
-    # 5. Compute correlation area A_corr
-    # -----------------------------
-    A_corr = 2 * np.pi * sigma**2  # in pixels^2
-
-    # -----------------------------
-    # 6. Compute effective number of independent pixels
-    # -----------------------------
-    N_tot = data.size
-    Neff = N_tot / A_corr
-
-    # -----------------------------
-    # 7. Print results
-    # -----------------------------
-    print(f"Estimated correlation length sigma: {sigma:.3f} pixels")
-    print(f"Estimated correlation area A_corr: {A_corr:.3f} pixels^2")
-    print(f"Estimated effective number of independent pixels Neff: {Neff:.3e}")
-
 
 def create_fit_params(t):
     return lmfit.create_params(
@@ -636,7 +602,7 @@ def do_profile_likelihood(param_name, param_values, broadened_file, intrinsic_fi
     lsq_vals = {k: v["value"] for k, v in saved.items()} if isinstance(first_val, dict) else saved
 
     _t_full = np.linspace(0, tscale * broadened_centered.shape[1], broadened_centered.shape[1])
-    sigma_noise = estimate_sigma_noise(
+    sigma_noise, _noise_2d, _smooth_sigma = estimate_sigma_noise(
         broadened_centered, field_interp,
         t=_t_full, t_on=lsq_vals.get("t_on", 30.0), t_off=lsq_vals.get("t_off", 45.0),
         save_path=fits_path / "noise_smooth_sigma_lcurve.png",
@@ -647,8 +613,8 @@ def do_profile_likelihood(param_name, param_values, broadened_file, intrinsic_fi
     for pname, pval in lsq_vals.items():
         if pname in _lsq_params and _lsq_params[pname].expr is None:
             _lsq_params[pname].set(value=pval)
-    n_eff_total, n_eff_col, _acf = estimate_n_eff(
-        broadened_centered[:, ::skip_times], field=field_interp)
+    n_eff_total, n_eff_col, _acf = estimate_n_eff(broadened_centered[:, ::skip_times], field=field_interp, field_smooth_sigma=_smooth_sigma,
+                                                   save_path=fits_path / "noise_acf.png")
     print(f"N_eff = {n_eff_total:.1f}  (N_eff_field={n_eff_col:.1f} × N_eff_time=3 fixed)")
     # best-fit chi-square: re-evaluate at LSQ params
     _lsq_resid = fit_function(
@@ -910,7 +876,7 @@ def do_profile_likelihood_matrix(
     lsq_vals = {k: v["value"] for k, v in saved.items()} if isinstance(first_val, dict) else saved
 
     _t_full = np.linspace(0, tscale * broadened_centered.shape[1], broadened_centered.shape[1])
-    sigma_noise = estimate_sigma_noise(
+    sigma_noise, _noise_2d, _smooth_sigma = estimate_sigma_noise(
         broadened_centered, field_interp,
         t=_t_full, t_on=lsq_vals.get("t_on", 30.0), t_off=lsq_vals.get("t_off", 45.0),
         save_path=fits_path / "noise_smooth_sigma_lcurve.png",
@@ -922,8 +888,8 @@ def do_profile_likelihood_matrix(
             ref_params[pname].set(value=pval)
 
     # --- N_eff and chi-square threshold ---
-    n_eff_total, n_eff_field, _acf = estimate_n_eff(
-        broadened_centered[:, ::skip_times], field=field_interp)
+    n_eff_total, n_eff_field, _acf = estimate_n_eff(broadened_centered[:, ::skip_times], field=field_interp, field_smooth_sigma=_smooth_sigma,
+                                                    save_path=fits_path / "noise_acf.png")
     _lsq_resid = fit_function(
         ref_params, broadened_centered[:, ::skip_times], pake_arr,
         intrinsic_centered[:, 0], t, r, field_interp, sigma_noise=sigma_noise,
@@ -1554,7 +1520,7 @@ def do_multistart(
     _, intrinsic_centered = interpolate(intrinsic_centered, field_col, n=n)
     intrinsic_centered /= np.max(intrinsic_centered)
     broadened_centered /= np.max(broadened_centered)
-    sigma_noise = estimate_sigma_noise(broadened_centered, field_interp)
+    sigma_noise, _, _ = estimate_sigma_noise(broadened_centered, field_interp)
     _, pake_arr = interpolate_pake(pake_df, field_col, n_reference=n)
     pake_arr = pake_arr[:, :-1:][:, ::-1]
     pake_arr = pake_arr / np.trapz(pake_arr, axis=0)[np.newaxis, :]
@@ -1748,7 +1714,7 @@ def do_fitting(
 
     _t_on = params["t_on"].value
     _t_off = params["t_off"].value
-    sigma_noise = estimate_sigma_noise(broadened_data_centered, field, t=t, t_on=_t_on, t_off=_t_off, save_path=noise_save_path) if field is not None else None
+    sigma_noise, _, _ = estimate_sigma_noise(broadened_data_centered, field, t=t, t_on=_t_on, t_off=_t_off, save_path=noise_save_path) if field is not None else (None, None, None)
     if sigma_noise is not None:
         print(f"Estimated σ_noise = {sigma_noise:.5f} (quiet regions: t < {_t_on:.0f} and t > {_t_off + 5:.0f} s)")
 
@@ -1844,7 +1810,7 @@ def do_emcee(
     import os
     _t_on = best_params["t_on"].value
     _t_off = best_params["t_off"].value
-    sigma_noise = estimate_sigma_noise(broadened_data_centered, field, t=t, t_on=_t_on, t_off=_t_off) if field is not None else None
+    sigma_noise, _, _ = estimate_sigma_noise(broadened_data_centered, field, t=t, t_on=_t_on, t_off=_t_off) if field is not None else (None, None, None)
     obj = lmfit.Minimizer(
         fit_function,
         best_params,
@@ -1983,8 +1949,6 @@ def main(
 
     # Define checkpoint file path
     checkpoint_file = fits_path.joinpath(".fit_checkpoint.repr")
-
-    autocorrelation(pake_data)
 
     if technique == "emcee":
         if not lsq_params_repr_path.is_file():
@@ -2379,34 +2343,31 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
     fit_slice = out[:, t_idx]
     dl_norm = np.trapz(dl_slice)
 
+    sl_slice = intrinsic_data_centered[:, t_idx]
+    sl_norm = np.trapz(sl_slice)
+
     fig_w, ax_w = plt.subplots()
+    ax_w.plot(field_interp, sl_slice / sl_norm, label="SL", color="C1")
     ax_w.plot(field_interp, dl_slice / dl_norm, label="DL", color="C0")
-    ax_w.plot(field_interp, fit_slice / dl_norm, label="DL fit", color="C2")
     ax_w.plot(
         field_interp,
         (dl_slice * gauss_window) / dl_norm,
-        label="DL × window",
+        label=r"DL$\times$$W$",
         color="C0",
         linestyle="--",
         alpha=0.7,
     )
-    ax_w.plot(
-        field_interp,
-        (fit_slice * gauss_window) / dl_norm,
-        label="DL fit × window",
-        color="C2",
-        linestyle="--",
-        alpha=0.7,
-    )
     ax_twin = ax_w.twinx()
-    ax_twin.plot(field_interp, gauss_window, color="gray", linestyle=":", linewidth=1, label="window")
+    ax_twin.plot(field_interp, gauss_window, color="gray", linestyle=":", linewidth=1, label="$W$")
     ax_twin.set_ylabel("Window weight")
     ax_twin.set_ylim(0, 1.4)
     ax_w.set_xlabel("Field (G)")
     ax_w.set_ylabel("Amplitude (arb. u)")
-    lines_left, labels_left = ax_w.get_legend_handles_labels()
-    lines_right, labels_right = ax_twin.get_legend_handles_labels()
-    ax_w.legend(lines_left + lines_right, labels_left + labels_right, handlelength=0.75, labelspacing=0.25)
+    lines_l, labels_l = ax_w.get_legend_handles_labels()
+    lines_r, labels_r = ax_twin.get_legend_handles_labels()
+    ax_w.legend(lines_l + lines_r, labels_l + labels_r, handlelength=1, labelspacing=0.2,
+                markerfirst=True, loc="upper right",
+                bbox_to_anchor=(0.98, 0.98), bbox_transform=ax_w.transAxes)
     fig_w.savefig(fits_path.joinpath("slice_windowed.png"), dpi=1200)
     plt.close(fig_w)
 

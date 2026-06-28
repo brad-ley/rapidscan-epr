@@ -25,7 +25,8 @@
       "Bash(cp '/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Data/2023/5/WT FMN \\(30, 31 May 23\\)/31/FMN sample/stable copy/291.3/fits/fit_imshow.png' /Users/Brad/Documents/Research/Code/python/rapidscan/notes/img/fit_imshow.png)",
       "Bash(cp '/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Data/2023/5/WT FMN \\(30, 31 May 23\\)/31/FMN sample/stable copy/291.3/fits/residue.png' /Users/Brad/Documents/Research/Code/python/rapidscan/notes/img/residue.png)",
       "Bash(cp '/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Data/2023/5/WT FMN \\(30, 31 May 23\\)/31/FMN sample/stable copy/291.3/fits/noise_after_smoothing.png' /Users/Brad/Documents/Research/Code/python/rapidscan/notes/img/noise_after_smoothing.png)",
-      "Bash(cp '/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Data/2023/5/WT FMN \\(30, 31 May 23\\)/31/FMN sample/stable copy/291.3/fits/lcurve_tau_prior.png' /Users/Brad/Documents/Research/Code/python/rapidscan/notes/img/lcurve_tau_prior.png)"
+      "Bash(cp '/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Data/2023/5/WT FMN \\(30, 31 May 23\\)/31/FMN sample/stable copy/291.3/fits/lcurve_tau_prior.png' /Users/Brad/Documents/Research/Code/python/rapidscan/notes/img/lcurve_tau_prior.png)",
+      "Bash(python plot_time_window.py)"
     ]
   }
 }

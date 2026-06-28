@@ -73,6 +73,18 @@ def main():
     r_fine = np.linspace(r.min(), r.max(), 500)
     colors = {"1 bar": "tab:blue", "3 kbar": "tab:orange"}
 
+    plt.style.use(["science"])
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.size": 14,
+        "axes.linewidth": 1,
+        "lines.linewidth": 2,
+        "xtick.major.size": 5, "xtick.major.width": 1,
+        "xtick.minor.size": 2, "xtick.minor.width": 1,
+        "ytick.major.size": 5, "ytick.major.width": 1,
+        "ytick.minor.size": 2, "ytick.minor.width": 1,
+    })
+
     fig, ax = plt.subplots(figsize=(7, 4))
     for col, label in [("P_1bar_mean", "1 bar"), ("P_3kbar_mean", "3 kbar")]:
         P = df[col].values
@@ -83,13 +95,12 @@ def main():
             gaussian(r_fine, p["A"], p["mu_nm"], p["sigma_nm"]),
             "-",
             color=colors[label],
-            label=f"{label} fit  μ={p['mu_nm']:.3f} nm, σ={p['sigma_nm']:.3f} nm",
+            label=f"{label} fit  $\\mu$={p['mu_nm']:.2f} nm, $\\sigma$={p['sigma_nm']:.2f} nm",
         )
 
     ax.set_xlabel("r (nm)")
     ax.set_ylabel("P(r)")
-    ax.legend(fontsize=8)
-    ax.set_title("Gaussian fits to P(r)")
+    ax.legend(fontsize=12)
     fig.tight_layout()
 
     png_path = CSV_PATH.parent / (CSV_PATH.stem + "_gaussian_fits.png")

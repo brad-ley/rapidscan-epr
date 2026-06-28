@@ -604,92 +604,233 @@ and the profile likelihood correctly shows an open upper bound on $\delta$.</p>
 <!-- ============================================================ -->
 <h2 id="s7">7. Standard Analysis Workflow</h2>
 
-<p>A step-by-step guide for fitting a new dataset from scratch.</p>
+<p>A step-by-step guide for fitting a new dataset from scratch. Every step is controlled
+by flags at the top of <code>pakeGlobalFit_v3.py</code>.</p>
 
+<!-- ── NOISE PIPELINE BOX ─────────────────────────────────────── -->
+<div class="info">
+<strong>Noise pipeline (runs at the start of every fit and every profile scan)</strong>
+<p>Two quantities are estimated before any fitting: the noise amplitude
+<code>sigma_noise</code> and the effective sample size <code>N_eff</code>.
+Both share the same auto-selected field-smoothing width.</p>
+
+<p><strong>1. Auto-select smoothing width via L-curve</strong> —
+<code>_smooth_sigma_lcurve(data_quiet, field)</code> scans
+<code>field_smooth_sigma</code> over a log-spaced range (~0.1–5 G).
+For each candidate value it computes <code>std(data - gaussian_filter1d(data, sigma_pts, axis=0))</code>
+on the quiet-region data (see below), builds the curve
+<code>(log field_smooth_sigma, std)</code>, and finds the knee via Menger curvature.
+The knee value is stored as <code>_smooth_sigma</code> (typically ~0.7 G).
+A two-panel diagnostic is saved to <code>fits/noise_smooth_sigma_lcurve.png</code>.</p>
+
+<p><strong>2. Noise amplitude</strong> —
+<code>estimate_sigma_noise(data, field, t=t_full, t_on=t_on, t_off=t_off)</code>
+first masks the time axis to <em>quiet regions</em>:
+<code>t &lt; t_on</code> OR <code>t &gt; t_off + 5</code> s, giving
+<code>data_quiet</code> (shape: <code>n_field × n_quiet_times</code>).
+It then applies the auto-selected <code>_smooth_sigma</code> and returns:
+<ul style="margin:0.4em 0 0 1.2em;">
+  <li><code>sigma_noise</code> = <code>std(data_quiet − gaussian_filter1d(data_quiet, sigma_pts, axis=0))</code></li>
+  <li><code>noise_2d</code> — the 2-D noise array (field × quiet-times) used for diagnostics</li>
+  <li><code>_smooth_sigma</code> — the L-curve-selected smoothing width in Gauss</li>
+</ul>
+<code>sigma_noise</code> is passed to <code>fit_function()</code> and divides all
+data residuals so that $\chi^2 \approx 1$ for a well-calibrated fit.
+It has <em>no effect</em> on CI bounds (cancels in the relative Wilks ratio)
+but sets the scale of <code>tau_prior</code> regularisation.</p>
+
+<p><strong>3. Effective sample size</strong> —
+<code>estimate_n_eff(data_full[:, ::skip_times], field=field_interp, field_smooth_sigma=_smooth_sigma)</code>
+uses the <em>full</em> dataset (all time points, subsampled by <code>skip_times</code>)
+because field-axis correlation is a spectrometer property independent of signal content.
+Steps:
+<ol style="margin:0.4em 0 0 1.2em;">
+  <li>Subtract <code>gaussian_filter1d(data, sigma_pts, axis=0)</code> using the
+      same <code>_smooth_sigma</code> to get the noise array.</li>
+  <li>For each time column $j$: compute the normalised field-axis ACF
+      $\hat{\rho}_k^{(j)} = \tfrac{\sum_i x_i x_{i+k}}{\sum_i x_i^2}$
+      via <code>np.correlate(col, col, mode="full")</code>, averaged over all
+      valid columns.</li>
+  <li>Sum to the first zero-crossing lag $k_0$:
+      $N_\text{eff,field} = N_\text{field} / (1 + 2\sum_{k=1}^{k_0}\hat\rho_k)$.</li>
+  <li>Multiply by <code>n_time_independent = 3</code> (pre-laser baseline, rising
+      phase $\tau_1$, decaying phase $\tau_2$):
+      $N_\text{eff} = N_\text{eff,field} \times 3$.</li>
+</ol>
+Printed as: <code>N_eff = XX.X  (N_eff_field=YY.Y × N_eff_time=3 fixed)</code></p>
+
+<p><strong>4. Wilks threshold</strong> —
+$\Delta\chi^2_\text{95\%} = 3.84 \times \chi^2_\text{min} / N_\text{eff}$,
+where $\chi^2_\text{min}$ is re-evaluated at the stored LSQ parameters.
+Printed as: <code>chi2_min(LSQ) = X.XXX  Δchi2_threshold(95%) = X.XXX</code>.</p>
+</div>
+
+<!-- ── STEP 1 ──────────────────────────────────────────────────── -->
 <h3>Step 1 — Fast exploratory fit</h3>
 <div class="box">
 <p>Set flags at the top of the script:</p>
-<pre>REDUCE_COMPUTATION_SPEEDUP = True   # coarse r-grid, fewer field/time points
-RUN_PROFILE_MATRIX = False
-PROFILE_LIKELIHOOD = False</pre>
-<p>Run the script. This executes basinhopping followed by a local LSQ polish and saves
-results to the <code>LSQ_fast/</code> subfolder. The goal is a reasonable starting
-parameter set, not a publication-quality fit. Check <code>raw_imshow.png</code> vs
-<code>fit_imshow.png</code> and <code>residue.png</code> to verify the fit is plausible.
-Also inspect <code>noise_smooth_sigma_lcurve.png</code> to confirm the auto-selected
-smoothing $\sigma^*$ sits at a sensible knee.</p>
+<pre>SKIP_TO_EMCEE       = False
+REDUCE_COMPUTATION_SPEEDUP = True   # coarse r-grid, fewer field/time points
+RUN_PROFILE_MATRIX  = False
+PROFILE_LIKELIHOOD  = False
+REFINE_FROM_SEED    = False</pre>
+<p>Run the script. The pipeline is:</p>
+<ol>
+  <li><strong>Noise estimation</strong> (see box above) — prints
+      <code>Auto-selected field_smooth_sigma = X.XX G (L-curve knee)</code> and
+      <code>Estimated σ_noise = X.XXXXX</code>. Saves
+      <code>fits/noise_smooth_sigma_lcurve.png</code>. Verify the knee is at a
+      plausible value (~0.5–2 G); if the curve has no clear knee, the quiet-region
+      mask may be too short.</li>
+  <li><strong>Basinhopping</strong> — global stochastic search; saves intermediate
+      best parameters to <code>fits/.fit_checkpoint.repr</code> after each improving
+      step.</li>
+  <li><strong>LSQ polish</strong> — Trust Region Reflective local minimisation from
+      the basinhopping result. Saves final parameters to
+      <code>fits/.fit_params_lsq.repr</code>.</li>
+  <li><strong>Plots</strong> — <code>raw_imshow.png</code>, <code>fit_imshow.png</code>,
+      <code>residue.png</code>, <code>slice.png</code>, <code>slice_windowed.png</code>
+      (shows SL, DL, DL×W(B), and W(B)). Check that the fit residuals are small and
+      structureless.</li>
+</ol>
+<p>The goal here is a plausible starting parameter set, not a publication fit. The
+coarse grid makes this run fast.</p>
 </div>
 
+<!-- ── STEP 2 ──────────────────────────────────────────────────── -->
 <h3>Step 2 — Calibrate $\tau_\text{prior}$ via L-curve</h3>
 <div class="box">
 <p>Set flags:</p>
-<pre>REDUCE_COMPUTATION_SPEEDUP = True   # fast is fine for this scan
+<pre>SKIP_TO_EMCEE      = False
+REDUCE_COMPUTATION_SPEEDUP = True   # fast is fine for this scan
 PROFILE_LIKELIHOOD = True           # runs the tau_prior L-curve scan</pre>
-<p>The script scans <code>tau_prior</code> over a log-spaced range and plots two things:
-(a) the L-curve of $\chi^2_\text{data}$ vs. prior deviation, and (b) the Menger
-curvature along it. The corner of maximum curvature is the optimal $\tau_\text{prior}$
-— strong enough to prevent degeneracy, weak enough not to dominate the data fit.
-Read the printed value and set:</p>
-<pre>TAU_PRIOR = 3.8   # (or whatever the corner gives)</pre>
-<p>in the flags block. This value is dataset-specific and should be re-derived for
-each new sample if SNR or linewidth constraints differ significantly.</p>
+<p>The script loads the LSQ result from Step 1, then scans <code>tau_prior</code>
+over a log-spaced range (typically $10^{-1}$ to $10^2$). At each value it re-runs the
+LSQ and records:
+<ul>
+  <li>$\chi^2_\text{data}$ — the data-only residual (without prior penalty)</li>
+  <li>$\chi^2_\text{prior}$ — the prior deviation term $\sum_p (\ln\theta_p - \ln\theta_p^0)^2 / \tau_\text{prior}^2$</li>
+</ul>
+These form the L-curve. Menger curvature is computed at each interior point and the
+maximum-curvature corner is the optimal $\tau_\text{prior}$: strong enough to prevent
+degeneracy, weak enough not to dominate the data. Read the printed value and hardcode:</p>
+<pre>TAU_PRIOR = 3.8   # (or whatever the L-curve corner gives)</pre>
+<p>Re-derive this for each new sample if SNR or linewidths differ significantly. A gap
+between the all-priors run and a w0/w1-only run indicates one prior conflicts with the
+data — investigate before proceeding.</p>
 </div>
 
+<!-- ── STEP 3 ──────────────────────────────────────────────────── -->
 <h3>Step 3 — Production fit at full resolution</h3>
 <div class="box">
 <p>Set flags:</p>
-<pre>REDUCE_COMPUTATION_SPEEDUP = False  # full r-grid, full field/time resolution
-PROFILE_LIKELIHOOD = False
-RUN_PROFILE_MATRIX = False</pre>
-<p>Run the script. Basinhopping explores the landscape at full resolution, then LSQ
-polishes the result. Output goes to <code>LSQ/</code>. This run also saves
-<code>noise_smooth_sigma_lcurve.png</code> in <code>LSQ/</code> — verify $\sigma^*$ is
-consistent with the fast run. If the fit residuals look good, proceed.</p>
+<pre>SKIP_TO_EMCEE       = False
+REDUCE_COMPUTATION_SPEEDUP = False  # full r-grid, full field/time resolution
+PROFILE_LIKELIHOOD  = False
+RUN_PROFILE_MATRIX  = False
+REFINE_FROM_SEED    = False</pre>
+<p>Run the script. Basinhopping + LSQ at full resolution. Output goes to
+<code>fits/</code>. Key things to check:</p>
+<ul>
+  <li><code>noise_smooth_sigma_lcurve.png</code> — confirm <code>_smooth_sigma</code>
+      is consistent with the fast run. A large change (e.g. 0.7 G → 2 G) suggests the
+      noise or signal structure changed between resolutions.</li>
+  <li><code>sigma_noise</code> printed value — should be stable to ~10% between runs
+      at different resolutions.</li>
+  <li>Residual plots — structureless residuals confirm the model is adequate.</li>
+  <li><code>fits/.fit_params_lsq.repr</code> — saved parameter dict used by all
+      subsequent steps. Do not delete unless starting over.</li>
+</ul>
 
-<div class="warn"><strong>If the profile matrix later reports LSQ outside a CI</strong>
-(i.e. the scan found a lower $\chi^2$ than the stored LSQ), the code prints a
-<code>!!!</code> warning and saves an improved seed. Set
-<code>REFINE_FROM_SEED = True</code> and re-run once to refine the LSQ from that seed
-without basinhopping, then reset to <code>False</code>.</div>
+<div class="warn"><strong>If the profile matrix (Step 4) later reports a lower
+$\chi^2$ than the stored LSQ</strong>, the code prints a <code>!!!</code> warning,
+updates <code>chi2_min_lsq</code>, and saves an improved seed. Set
+<code>REFINE_FROM_SEED = True</code> and re-run once to polish from that seed without
+basinhopping. Reset to <code>False</code> afterwards.</div>
 </div>
 
+<!-- ── STEP 4 ──────────────────────────────────────────────────── -->
 <h3>Step 4 — Profile likelihood matrix for confidence intervals</h3>
 <div class="box">
 <p>Set flags:</p>
-<pre>REDUCE_COMPUTATION_SPEEDUP = False  # profile scan uses full resolution
-RUN_PROFILE_MATRIX = True</pre>
-<p>The script loads the saved LSQ result and scans each free parameter
-bi-directionally. At each scan point it fixes that parameter and re-optimises all
-others (Trust Region Reflective, 20 points per parameter). Results are saved to
-<code>profile_matrix_scans.txt</code> and <code>profile_likelihood_matrix.png</code>.</p>
+<pre>SKIP_TO_EMCEE      = True    # skip basinhopping; load saved LSQ params
+RUN_PROFILE_MATRIX = True    # run the full corner-plot scan
+REDUCE_COMPUTATION_SPEEDUP = False</pre>
+<p>The script:</p>
+<ol>
+  <li>Loads <code>fits/.fit_params_lsq.repr</code>.</li>
+  <li>Runs the noise pipeline (see box above) — prints <code>_smooth_sigma</code>,
+      <code>sigma_noise</code>, <code>N_eff_field</code>, <code>N_eff_total</code>,
+      <code>chi2_min_lsq</code>, and <code>delta_chi2_threshold</code>. Verify these
+      are consistent with Step 3.</li>
+  <li>For each free parameter: scans over a grid of ~20 values spanning the parameter
+      bounds (log-spaced if the bound ratio exceeds 20×, linear otherwise). At each
+      grid point the parameter is fixed and all others are re-optimised with TRF. The
+      scan runs bi-directionally (outward from the LSQ value, warm-starting each step
+      from the previous result) to avoid basin-hopping artefacts. The LSQ point itself
+      is injected into every scan's DataFrame so the profile minimum is correctly
+      anchored.</li>
+  <li>After all scans, checks whether any scan found a lower $\chi^2$ than
+      <code>chi2_min_lsq</code>. If so, prints <code>!!!</code> and saves an improved
+      seed (see Step 3 warning).</li>
+  <li>Plots <code>profile_likelihood_matrix.png</code> (corner plot). Each diagonal
+      panel shows: raw $\chi^2$ profile (black), 95% CI threshold (red dashed,
+      $\Delta\chi^2 = 3.84\,\chi^2_\text{min}/N_\text{eff}$), $\pm1\sigma$ band
+      (blue, $\Delta\chi^2 = \chi^2_\text{min}/N_\text{eff}$, rescaled Wilks), and
+      the LSQ value (red dot). Off-diagonal panels show parameter co-variation traces.</li>
+  <li>Prints the CI table:
+      <code>Parameter | LSQ | CI_low | CI_high  (95%, N_eff=XX)</code>.</li>
+</ol>
 
-<p>Check the corner plot:</p>
+<p>What to check:</p>
 <ul>
-  <li>Each diagonal should show a clear $\chi^2$ minimum near the red dot (LSQ value).
-      If the minimum is shifted, the LSQ may be in a local basin — see the warning
-      above.</li>
-  <li>Open bounds (<code>&lt;scan_min</code> / <code>&gt;scan_max</code>) are physically
-      meaningful for parameters that hit a hard floor (e.g. $\tau_1 \to 0$) or have a
-      flat profile on one side (e.g. large $n_\text{resp}$).</li>
-  <li>The $\pm1\sigma$ blue band should be narrower than the 95% CI red lines. If they
-      are similar width the profile is parabolic and the Gaussian approximation is
-      reliable. Wide separation indicates asymmetry or non-parabolic behaviour.</li>
+  <li>Each diagonal minimum should sit at or very near the red LSQ dot. A shifted
+      minimum means the LSQ is in a local basin — use the <code>!!!</code> seed and
+      <code>REFINE_FROM_SEED</code>.</li>
+  <li>Open bounds (<code>&lt;scan_min</code> / <code>&gt;scan_max</code>) are
+      physically meaningful: e.g. $\tau_1 \to 0$ (faster than time resolution) or
+      $n_\text{resp} \to$ bound (model insensitive at saturation).</li>
+  <li>The $\pm1\sigma$ blue band should be narrower than the 95% CI red lines. Large
+      separation indicates an asymmetric or non-parabolic profile — the Gaussian
+      approximation would be misleading for that parameter; use the CI bounds.</li>
+  <li>For derived quantity $r_1 = r_0 + \delta$, the CI is computed from the joint
+      profile over the scan of $\delta$ (with $r_0$ free to co-vary), so it is
+      correctly narrower than naive propagation of the individual CIs.</li>
 </ul>
-
-<p>Report the printed CI table. For derived quantity $r_1 = r_0 + \delta$, the CI is
-computed from the joint $(\delta, r_0)$ profile (not the sum of individual CIs), so it
-is correctly narrower than naive error propagation.</p>
 </div>
 
+<!-- ── FLAG REFERENCE ──────────────────────────────────────────── -->
 <h3>Quick flag reference</h3>
 <table>
-  <tr><th>Flag</th><th>Effect</th></tr>
-  <tr><td><code>REDUCE_COMPUTATION_SPEEDUP</code></td><td>Coarser grids for speed (steps 1–2); always <code>False</code> for production</td></tr>
-  <tr><td><code>PROFILE_LIKELIHOOD</code></td><td>Runs 1D tau_prior / alpha / delta L-curve scans (step 2)</td></tr>
-  <tr><td><code>RUN_PROFILE_MATRIX</code></td><td>Runs full corner-plot CI scan over all free parameters (step 4)</td></tr>
-  <tr><td><code>REFINE_FROM_SEED</code></td><td>Skip basinhopping; polish LSQ from saved seed (use after <code>!!!</code> warning)</td></tr>
-  <tr><td><code>TAU_PRIOR</code></td><td>Prior strength from L-curve corner; re-derive per dataset</td></tr>
-  <tr><td><code>N414Q</code></td><td>Dataset toggle — controls <code>t_off</code> default and data path</td></tr>
+  <tr><th>Flag</th><th>Type</th><th>Effect</th></tr>
+  <tr><td><code>SKIP_TO_EMCEE</code></td><td>bool</td><td>Skip basinhopping + LSQ; load saved <code>.fit_params_lsq.repr</code> directly. Set <code>True</code> for Step 4.</td></tr>
+  <tr><td><code>REDUCE_COMPUTATION_SPEEDUP</code></td><td>bool</td><td>Coarser r-grid and fewer field/time points for speed. Always <code>False</code> for production fits and profiles.</td></tr>
+  <tr><td><code>PROFILE_LIKELIHOOD</code></td><td>bool</td><td>Runs 1D $\tau_\text{prior}$ L-curve scan (Step 2). Independent of <code>RUN_PROFILE_MATRIX</code>.</td></tr>
+  <tr><td><code>RUN_PROFILE_MATRIX</code></td><td>bool</td><td>Runs the full corner-plot CI scan over all free parameters (Step 4).</td></tr>
+  <tr><td><code>REFINE_FROM_SEED</code></td><td>bool</td><td>Skip basinhopping; seed LSQ from saved <code>.fit_params_lsq.repr</code>. Use after a <code>!!!</code> warning.</td></tr>
+  <tr><td><code>TAU_PRIOR</code></td><td>float</td><td>Prior strength; read from L-curve corner (Step 2). Dataset-specific.</td></tr>
+  <tr><td><code>N414Q</code></td><td>bool</td><td>Dataset toggle — controls default <code>t_off</code>, <code>tau_2_prior</code>, and data paths.</td></tr>
+  <tr><td><code>RUN_EMCEE</code></td><td>bool</td><td>Run MCMC sampling after LSQ (rarely needed; CI from profiles is preferred).</td></tr>
+  <tr><td><code>RUN_BOOTSTRAP</code></td><td>bool</td><td>Residual block bootstrap for parameter uncertainties (alternative to profile CI).</td></tr>
+</table>
+
+<!-- ── NOISE VARIABLE GLOSSARY ────────────────────────────────── -->
+<h3>Noise variable glossary</h3>
+<table>
+  <tr><th>Variable / function</th><th>Where</th><th>Meaning</th></tr>
+  <tr><td><code>_smooth_sigma</code></td><td><code>estimate_sigma_noise()</code> return [2]</td><td>L-curve-selected Gaussian smoothing width (G) shared by sigma and N_eff estimation.</td></tr>
+  <tr><td><code>sigma_pts</code></td><td>inside both noise functions</td><td><code>_smooth_sigma / field_spacing</code> — smoothing width in array index units, passed to <code>gaussian_filter1d</code>.</td></tr>
+  <tr><td><code>data_quiet</code></td><td><code>estimate_sigma_noise()</code> internal</td><td><code>data[:, mask]</code> after applying quiet-region mask <code>(t &lt; t_on) | (t &gt; t_off+5)</code>.</td></tr>
+  <tr><td><code>noise_2d</code></td><td><code>estimate_sigma_noise()</code> return [1]</td><td><code>data_quiet − gaussian_filter1d(data_quiet)</code> — high-frequency field noise on quiet time slices.</td></tr>
+  <tr><td><code>sigma_noise</code></td><td><code>estimate_sigma_noise()</code> return [0]</td><td><code>std(noise_2d)</code> — noise amplitude. Divides all data residuals in <code>fit_function()</code>.</td></tr>
+  <tr><td><code>_sigma</code></td><td><code>fit_function()</code> line ~391</td><td>Local alias for <code>sigma_noise</code> (falls back to 0.006 if <code>None</code>).</td></tr>
+  <tr><td><code>acf_mean</code></td><td><code>estimate_n_eff()</code></td><td>Field-axis ACF averaged over all time columns: $\hat\rho_k = \overline{\hat\rho_k^{(j)}}$.</td></tr>
+  <tr><td><code>zc</code> / <code>cutoff</code></td><td><code>estimate_n_eff()</code></td><td>First zero-crossing lag $k_0$ of <code>acf_mean</code>; ACF is summed only to this lag.</td></tr>
+  <tr><td><code>n_eff_field</code></td><td><code>estimate_n_eff()</code> return [1]</td><td>$N_\text{field} / (1 + 2\sum_{k=1}^{k_0}\hat\rho_k)$</td></tr>
+  <tr><td><code>n_eff_total</code></td><td><code>estimate_n_eff()</code> return [0]</td><td><code>n_eff_field × 3</code> (3 kinetically independent time phases).</td></tr>
+  <tr><td><code>chi2_min_lsq</code></td><td>profile functions</td><td><code>sum(fit_function(lsq_params)²)</code> — normalised $\chi^2$ at the LSQ minimum (~1 for a good fit).</td></tr>
+  <tr><td><code>delta_chi2_threshold</code></td><td>profile functions</td><td>$3.84 \times \chi^2_\text{min} / N_\text{eff}$ — relative Wilks 95% CI threshold.</td></tr>
+  <tr><td><code>field_sigma_gauss</code></td><td><code>fit_function()</code>, plots</td><td>Super-Gaussian field window half-width (fixed at 15 G). <em>Unrelated to noise smoothing.</em></td></tr>
 </table>
 
 </body>

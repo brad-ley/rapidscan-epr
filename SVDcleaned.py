@@ -178,6 +178,7 @@ class DataSet:
 
         # if k == 0:
         k = max(k, 2)
+        k = 3
         self.k = k
 
         self.fscree, self.ascree = plt.subplots()
@@ -358,28 +359,8 @@ class DataSet:
                         double_lorentzian(self.res.params, self.B),  # type: ignore
                         c=line.get_color(),
                         ls="--",
-                        # label=rf"$\omega={popt[-1]:.2f}\,$G",
-                        # label=r"$F_{\omega_1}+$"
-                        # r"$F_{\omega_2}$"
-                        # "\n"
-                        # rf"(${w1:.2f}\,$G; "
-                        # rf"${w2:.2f}\,$G)",
+                        label=rf"$\omega_1={w1:.1f}$, $\omega_2={w2:.1f}\,$G",
                     )
-                    self.lsva[idx, 0].plot(
-                        self.B,
-                        lorentzian(self.B, x0, a1, b1, w1),
-                        # c=line.get_color(),
-                        ls="--",
-                        label=rf"$\omega_1={w1:.1f}\,$G",
-                    )
-                    self.lsva[idx, 0].plot(
-                        self.B,
-                        -1 * lorentzian(self.B, x0, a2, b2, w2),
-                        # c=line.get_color(),
-                        ls="--",
-                        label=rf"$\omega_2={w2:.1f}\,$G",
-                    )
-                    self.lsva[idx, 0].legend(loc="lower right")
 
             except RuntimeError:
                 print(f"Could not fit w_{idx + 1} component")
