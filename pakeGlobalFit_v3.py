@@ -1,5 +1,6 @@
 # noqa: RUF100, N999, ANN001, A002, ANN201, E501, C408
 import ast
+import re
 import sys
 import time
 from pathlib import Path
@@ -14,20 +15,23 @@ import pandas as pd
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets
 from scipy.interpolate import interp1d
-from scipy.ndimage import gaussian_filter, gaussian_filter1d
+from scipy.ndimage import gaussian_filter1d
 
-N414Q = True
-SKIP_TO_EMCEE = True  # set True to skip basinhopping+lsq and go straight to emcee
+N414Q = False
+SKIP_TO_EMCEE = False  # set True to skip basinhopping+lsq and go straight to emcee
 RUN_EMCEE = False       # set False to skip emcee and plot using saved LSQ params
 LONG_EMCEE = False      # set True to run a long emcee run (default is short test values)
 REPLOT_FROM_COMPARISON = False  # set True to skip all fitting and regenerate plots from emcee_comparison.txt
-PROFILE_LIKELIHOOD = False  # set True to run profile likelihood scan over alpha_frac and delta
+PROFILE_TAU = True  # set True to run profile likelihood scan over alpha_frac and delta
+RUN_PROFILE_MATRIX = False   # set True to run profile likelihood matrix / corner plot
+REPLOT_PROFILE_MATRIX = False  # set True to regenerate plots/CI from saved profile_matrix_scans.txt (no re-scan)
+PROFILE_TOTAL_UNFOLDED = False  # set True to profile beta+alpha as a single quantity
 REDUCE_COMPUTATION_SPEEDUP = False  # set True to use reduced r-grid/field/time resolution for basinhopping and LSQ as well
 RUN_BOOTSTRAP = False  # set True to run residual block bootstrap for realistic parameter uncertainties
 RUN_MULTISTART = False   # set True to run multistart /landscape diagnostic (random restarts, same data)
-RUN_PROFILE_MATRIX = True  # set True to run profile likelihood matrix / corner plot
 REFINE_FROM_SEED = False    # set True to skip basinhopping and refine LSQ from saved .fit_params_lsq.repr seed
-TAU_PRIOR = 1.5 if N414Q else 1.5
+# TAU_PRIOR = 0.534 if N414Q else 0.766
+TAU_PRIOR = 0.534 if N414Q else 0.927
 
 if __name__ == "__main__":
     plt.style.use(["science"])
@@ -81,6 +85,22 @@ def enforce_increasing_x_axis(df, column="B"):
     if df[column].iloc[-1] < df[column].iloc[0]:
         df = df.iloc[::-1]
     return df
+
+
+def tscale_from_filename(filename, default_navgs=25000.0, default_freq_khz=23.5):
+    """Derive tscale = n_avgs / (freq_kHz * 1e3) from a data filename.
+
+    Looks for '<N>avgs' (e.g. '25000avgs') and '<F>kHz' (e.g. '23.5kHz')
+    patterns in the filename. Falls back to default_navgs/default_freq_khz
+    for whichever piece isn't found (so a filename with no frequency in it
+    just uses 23.5 kHz, matching the old hardcoded 25e3/23.5e3 default).
+    """
+    name = str(filename)
+    avgs_match = re.search(r"(\d+)avgs", name)
+    freq_match = re.search(r"([\d.]+)kHz", name)
+    navgs = float(avgs_match.group(1)) if avgs_match else default_navgs
+    freq_khz = float(freq_match.group(1)) if freq_match else default_freq_khz
+    return navgs / (freq_khz * 1e3)
 
 
 def remove_offset_and_normalize(y, f=0.1):
@@ -210,12 +230,15 @@ def normalized_gaussian(x, sigma, mu):
     return 1 / np.sqrt(2 * np.pi * sigma**2) * np.exp(-((x - mu) ** 2) / (2 * sigma**2))
 
 
-def _smooth_sigma_lcurve(data_slice, field):
+def _smooth_sigma_lcurve(data_slice, field, eval_mask=None):
     """Select optimal Gaussian field-smooth sigma via Menger curvature of std(residual) vs sigma.
 
     Scans sigma from 0.1 to 5 G. std(residual) rises from ~0 (smooth tracks noise)
     through a knee where signal is removed but noise is not, then rises again when
     sigma exceeds the EPR linewidth. The Menger curvature maximum marks the knee.
+
+    eval_mask: boolean array over the field axis; if given, std is computed only over
+    those rows (smoothing always uses the full contiguous field array).
 
     Returns (best_sigma_G, sigma_range, stds, curv).
     """
@@ -225,7 +248,11 @@ def _smooth_sigma_lcurve(data_slice, field):
     for sig_G in sigma_range:
         sig_pts = max(sig_G / field_spacing, 0.5)
         smooth = gaussian_filter1d(data_slice, sigma=sig_pts, axis=0)
-        stds.append(float(np.std(data_slice - smooth)))
+        residual = data_slice - smooth
+        if eval_mask is not None and eval_mask.any():
+            stds.append(float(np.std(residual[eval_mask])))
+        else:
+            stds.append(float(np.std(residual)))
     stds = np.array(stds)
 
     lx = np.log10(sigma_range)
@@ -245,11 +272,15 @@ def _smooth_sigma_lcurve(data_slice, field):
     return float(sigma_range[best_idx]), sigma_range, stds, curv
 
 
-def estimate_sigma_noise(data, field, field_smooth_sigma=None, t=None, t_on=None, t_off=None, save_path=None):
+def estimate_sigma_noise(data, field, field_smooth_sigma=None, far_field_G=10.0,
+                         t=None, t_on=None, t_off=None, save_path=None):
     """Estimate noise std by Gaussian-smoothing along the field axis and subtracting.
 
-    Uses the quiet regions of the time axis (t < t_on and t > t_off + 5) where the
-    signal is either absent or smoothly decaying, giving a larger baseline sample.
+    Only rows where |field| > far_field_G are used for L-curve sigma selection and
+    the returned std.  The smooth itself is computed on the full contiguous field axis
+    so the context is correct.  Set far_field_G=None to use the full field range
+    (old behaviour).
+
     If field_smooth_sigma is None, selects sigma automatically via Menger curvature
     of std(residual) vs. sigma (L-curve knee). Saves the L-curve plot if save_path
     is provided.
@@ -266,9 +297,13 @@ def estimate_sigma_noise(data, field, field_smooth_sigma=None, t=None, t_on=None
         if mask.any():
             data = data[:, mask]
 
+    far_mask = (np.abs(field) > far_field_G) if far_field_G is not None else None
+
     if field_smooth_sigma is None:
-        field_smooth_sigma, sigma_range, stds, curv = _smooth_sigma_lcurve(data, field)
-        print(f"  Auto-selected field_smooth_sigma = {field_smooth_sigma:.3g} G (L-curve knee)")
+        field_smooth_sigma, sigma_range, stds, curv = _smooth_sigma_lcurve(data, field, eval_mask=far_mask)
+        n_far = int(far_mask.sum()) if far_mask is not None else data.shape[0]
+        print(f"  Auto-selected field_smooth_sigma = {field_smooth_sigma:.3g} G (L-curve knee, "
+              f"{n_far}/{data.shape[0]} far-field rows)")
         if save_path is not None:
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 3))
             ax1.semilogx(sigma_range, stds, "b.-")
@@ -283,7 +318,7 @@ def estimate_sigma_noise(data, field, field_smooth_sigma=None, t=None, t_on=None
             ax2.set_ylabel("Menger curvature")
             ax2.set_title("Curvature (knee = selected $\\sigma$)")
             fig.tight_layout()
-            fig.savefig(save_path, dpi=200)
+            fig.savefig(save_path, dpi=600)
             plt.close(fig)
             print(f"  Saved sigma L-curve to {save_path}")
 
@@ -291,7 +326,11 @@ def estimate_sigma_noise(data, field, field_smooth_sigma=None, t=None, t_on=None
     sigma_pts = max(field_smooth_sigma / field_spacing, 0.5)
     smooth = gaussian_filter1d(data, sigma=sigma_pts, axis=0)
     noise_2d = data - smooth
-    return float(np.std(noise_2d)), noise_2d, float(field_smooth_sigma)
+    if far_mask is not None and far_mask.any():
+        sigma_val = float(np.std(noise_2d[far_mask]))
+    else:
+        sigma_val = float(np.std(noise_2d))
+    return sigma_val, noise_2d, float(field_smooth_sigma)
 
 
 def estimate_n_eff(data_2d, field=None, field_smooth_sigma=1.5, n_time_independent=3,
@@ -360,7 +399,7 @@ def estimate_n_eff(data_2d, field=None, field_smooth_sigma=1.5, n_time_independe
                 transform=ax.transAxes, ha="right", va="top", fontsize=10,
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="white", edgecolor="#aaa"))
         fig.tight_layout()
-        fig.savefig(save_path, dpi=200)
+        fig.savefig(save_path, dpi=600)
         plt.close(fig)
         print(f"  Saved ACF plot to {save_path}")
 
@@ -393,9 +432,9 @@ def fit_function(
     # Time-domain apodization
     # Create a double-sided exponential weight that peaks at t_off
     if type(params) is not dict:
-    	p = params.valuesdict()
+        p = params.valuesdict()
     else:
-    	p = params
+        p = params
 
     t_off_val = p["t_off"]
     # Define decay constant so that weight is 10% (~0.10) at the end of the experiment
@@ -545,12 +584,12 @@ def create_fit_params(t):
         t_on=dict(value=30, vary=False, min=30, max=45),  # noqa: C408
         t_off=dict(value=45 if N414Q else 40, vary=False, min=30, max=45),  # noqa: C408
         r0=dict(value=3.5, vary=True, min=2.0, max=4.5),  # noqa: C408
-        w0=dict(value=0.5 / 2.355, vary=True, min=0.1, max=1),  # noqa: C408
+        w0=dict(value=0.2, vary=True, min=0.1, max=2),  # noqa: C408
         w0_prior=dict(value=0.29, vary=False),
         tau_prior=dict(value=TAU_PRIOR, vary=False),
         delta=dict(value=1, vary=True, min=0.5, max=5),  # noqa: C408
         r1=dict(expr="r0 + delta if r0 + delta <= 7 else 7", vary=False),  # noqa: C408
-        w1=dict(value=1 / 2.355, vary=True, min=0.2, max=2),  # noqa: C408
+        w1=dict(value=0.3, vary=True, min=0.2, max=2),  # noqa: C408
         w1_prior=dict(value=0.44, vary=False),
         shift=dict(value=0.005, vary=True, min=-0.01, max=0.01),  # noqa: C408
     )
@@ -581,7 +620,7 @@ def do_profile_likelihood(param_name, param_values, broadened_file, intrinsic_fi
     _, pake_arr = interpolate_pake(pake_df, field, n_reference=n)
     pake_arr = pake_arr[:, :-1:][:, ::-1]
     pake_arr = pake_arr / np.trapz(pake_arr, axis=0)[np.newaxis, :]
-    tscale = 25e3 / 23.5e3
+    tscale = tscale_from_filename(broadened_file)
     t = np.linspace(0, tscale * broadened_centered.shape[1], broadened_centered[:, ::skip_times].shape[1])
     r_file = Path(pake_patterns).parent.joinpath("r-vals_" + Path(pake_patterns).stem + ".txt")
     r = np.loadtxt(r_file, delimiter=",") if r_file.exists() else np.linspace(1, 7, pake_arr.shape[1])
@@ -601,10 +640,8 @@ def do_profile_likelihood(param_name, param_values, broadened_file, intrinsic_fi
     first_val = next(iter(saved.values()))
     lsq_vals = {k: v["value"] for k, v in saved.items()} if isinstance(first_val, dict) else saved
 
-    _t_full = np.linspace(0, tscale * broadened_centered.shape[1], broadened_centered.shape[1])
     sigma_noise, _noise_2d, _smooth_sigma = estimate_sigma_noise(
         broadened_centered, field_interp,
-        t=_t_full, t_on=lsq_vals.get("t_on", 30.0), t_off=lsq_vals.get("t_off", 45.0),
         save_path=fits_path / "noise_smooth_sigma_lcurve.png",
     )
 
@@ -723,7 +760,7 @@ def do_profile_likelihood(param_name, param_values, broadened_file, intrinsic_fi
 
     axes[-1].set_xlabel(param_name)
     fig.tight_layout()
-    fig.savefig(out_png, dpi=150)
+    fig.savefig(out_png, dpi=600)
     plt.close(fig)
     print(f"Saved plot to {out_png}")
 
@@ -773,12 +810,12 @@ def do_profile_likelihood(param_name, param_values, broadened_file, intrinsic_fi
         ax_l.plot(pdev_all, chi, "-", color="gray", lw=0.8, zorder=2)
         for label, (idx, tau_c, devs, _) in corners.items():
             ax_l.scatter(pdev_all[idx], chi[idx], s=120, color=colors[label],
-                         zorder=4, label=f"{label} corner $\\tau$={tau_c:.2g}")
+                         zorder=4, label=f"{label} corner $\\tau$={tau_c:.3g}")
         if lsq_ref is not None:
             mask = np.isclose(taus, lsq_ref, rtol=0.05)
             if mask.any():
                 ax_l.scatter(pdev_all[mask], chi[mask], s=80, marker="D", color="orange",
-                             zorder=4, label=f"current $\\tau$={lsq_ref:.2g}")
+                             zorder=4, label=f"current $\\tau$={lsq_ref:.3g}")
         plt.colorbar(sc, ax=ax_l, label=r"tau\_prior")
         ax_l.set_xscale("log"); ax_l.set_yscale("log")
         ax_l.set_xlabel("prior dev (all)")
@@ -793,10 +830,10 @@ def do_profile_likelihood(param_name, param_values, broadened_file, intrinsic_fi
         ax_w.plot(pdev_w, chi, "-", color="gray", lw=0.8, zorder=2)
         idx_w, tau_w, _, _ = corners["w0+w1 only"]
         ax_w.scatter(pdev_w[idx_w], chi[idx_w], s=120, color=colors["w0+w1 only"],
-                     zorder=4, label=f"corner $\\tau$={tau_w:.2g}")
+                     zorder=4, label=f"corner $\\tau$={tau_w:.3g}")
         if lsq_ref is not None and mask.any():
             ax_w.scatter(pdev_w[mask], chi[mask], s=80, marker="D", color="orange",
-                         zorder=4, label=f"current $\\tau$={lsq_ref:.2g}")
+                         zorder=4, label=f"current $\\tau$={lsq_ref:.3g}")
         plt.colorbar(sc2, ax=ax_w, label=r"tau\_prior")
         ax_w.set_xscale("log"); ax_w.set_yscale("log")
         ax_w.set_xlabel("width dev (w0+w1 only)")
@@ -818,7 +855,7 @@ def do_profile_likelihood(param_name, param_values, broadened_file, intrinsic_fi
 
         fig_lc.tight_layout()
         lc_png = fits_path / "lcurve_tau_prior.png"
-        fig_lc.savefig(lc_png, dpi=150)
+        fig_lc.savefig(lc_png, dpi=600)
         plt.close(fig_lc)
         print(f"Saved L-curve to {lc_png}")
 
@@ -829,6 +866,7 @@ def do_profile_likelihood_matrix(
     broadened_file, intrinsic_file, pake_patterns,
     n_points=15,
     decimate_r=1, n_field=1024, skip_times=1,
+    replot=False,
 ):
     """Profile likelihood corner plot: 1D chi-square profile on the diagonal,
     how each other parameter co-varies on the off-diagonal cells.
@@ -855,7 +893,7 @@ def do_profile_likelihood_matrix(
     _, pake_arr = interpolate_pake(pake_df, field, n_reference=n)
     pake_arr = pake_arr[:, :-1:][:, ::-1]
     pake_arr = pake_arr / np.trapz(pake_arr, axis=0)[np.newaxis, :]
-    tscale = 25e3 / 23.5e3
+    tscale = tscale_from_filename(broadened_file)
     t = np.linspace(0, tscale * broadened_centered.shape[1], broadened_centered[:, ::skip_times].shape[1])
     r_file = Path(pake_patterns).parent.joinpath("r-vals_" + Path(pake_patterns).stem + ".txt")
     r = np.loadtxt(r_file, delimiter=",") if r_file.exists() else np.linspace(1, 7, pake_arr.shape[1])
@@ -875,10 +913,8 @@ def do_profile_likelihood_matrix(
     first_val = next(iter(saved.values()))
     lsq_vals = {k: v["value"] for k, v in saved.items()} if isinstance(first_val, dict) else saved
 
-    _t_full = np.linspace(0, tscale * broadened_centered.shape[1], broadened_centered.shape[1])
     sigma_noise, _noise_2d, _smooth_sigma = estimate_sigma_noise(
         broadened_centered, field_interp,
-        t=_t_full, t_on=lsq_vals.get("t_on", 30.0), t_off=lsq_vals.get("t_off", 45.0),
         save_path=fits_path / "noise_smooth_sigma_lcurve.png",
     )
 
@@ -913,9 +949,36 @@ def do_profile_likelihood_matrix(
 
     fit_args = (broadened_centered[:, ::skip_times], pake_arr, intrinsic_centered[:, 0], t, r, field_interp)
 
-    # --- run one 1D scan per free parameter ---
-    all_scans = {}
-    for scan_pname in param_names:
+    # --- run one 1D scan per free parameter (or reload from saved txt) ---
+    if replot:
+        out_txt = fits_path / "profile_matrix_scans.txt"
+        if not out_txt.is_file():
+            print(f"No saved scan data at {out_txt} — run RUN_PROFILE_MATRIX first.")
+            return None
+        all_scans = {}
+        _cur_pname, _cur_rows = None, []
+        with open(out_txt) as _fh:
+            for _line in _fh:
+                if _line.startswith("=== scan:"):
+                    if _cur_pname is not None and _cur_rows:
+                        import io
+                        all_scans[_cur_pname] = pd.read_csv(
+                            io.StringIO("".join(_cur_rows)), sep=r"\s+", engine="python"
+                        )
+                    _cur_pname = _line.strip().removeprefix("=== scan:").removesuffix("===").strip()
+                    _cur_rows = []
+                elif _cur_pname is not None:
+                    _cur_rows.append(_line)
+            if _cur_pname is not None and _cur_rows:
+                import io
+                all_scans[_cur_pname] = pd.read_csv(
+                    io.StringIO("".join(_cur_rows)), sep=r"\s+", engine="python"
+                )
+        param_names = list(all_scans.keys())
+        print(f"Loaded saved scans for: {param_names}")
+    else:
+        all_scans = {}
+    for scan_pname in ([] if replot else param_names):
         scan_vals = _scan_range(ref_params[scan_pname])
         ref_val = ref_params[scan_pname].value
         # Bi-directional: scan outward from LSQ value so warm-start is always
@@ -1143,9 +1206,12 @@ def do_profile_likelihood_matrix(
             lo, hi, sl, sh = _find_ci_bounds(df_s["scan_val"], df_s["chisqr"], log_x=_is_log_param(pn))
             ci_bounds[pn] = (lo, hi)
             sigma_bounds[pn] = (sl, sh)
-            lo_str = f"{lo:.4g}" if lo is not None else "<scan_min"
-            hi_str = f"{hi:.4g}" if hi is not None else ">scan_max"
-            lv = lsq_vals.get(pn, float("nan"))
+            _ps = float(field_interp[-1] - field_interp[0]) / 2.0 if pn == "shift" else 1.0
+            _disp_lo = lo * _ps if lo is not None else None
+            _disp_hi = hi * _ps if hi is not None else None
+            lo_str = f"{_disp_lo:.4g}" if _disp_lo is not None else "<scan_min"
+            hi_str = f"{_disp_hi:.4g}" if _disp_hi is not None else ">scan_max"
+            lv = lsq_vals.get(pn, float("nan")) * _ps
             print(f"  {pn:<10} {lv:>10.4g} {lo_str:>12} {hi_str:>12}")
     # r1 via delta scan — r1 is linearly spaced (it's a distance, not log-param)
     if "delta" in all_scans:
@@ -1159,20 +1225,39 @@ def do_profile_likelihood_matrix(
         print(f"  {'r1':<10} {r1_lsq:>10.4g} {lo_str:>12} {hi_str:>12}")
 
     # save CI table
+    _nr_lsq = lsq_vals.get("n_resp", float("nan"))
+    _beta_lsq = lsq_vals.get("beta", float("nan"))
+    _alpha_lsq = (_nr_lsq / (_nr_lsq + 1) * (1 - _beta_lsq)) if np.isfinite(_nr_lsq) and np.isfinite(_beta_lsq) else float("nan")
+    _lsq_lookup = dict(lsq_vals)
+    _lsq_lookup["r1"] = lsq_vals.get("r0", 0) + lsq_vals.get("delta", 0)
+    _lsq_lookup["alpha"] = _alpha_lsq
+    # shift is stored as a fraction; rescale to Gauss for the CI table.
+    # _shift_scale is defined just before the corner plot block below.
+    _shift_scale = float(field_interp[-1] - field_interp[0]) / 2.0
     ci_rows = []
     for pn, (lo, hi) in ci_bounds.items():
-        lv = lsq_vals.get(pn) if pn != "r1" else lsq_vals.get("r0", 0) + lsq_vals.get("delta", 0)
-        ci_rows.append({"param": pn, "lsq": lv, "ci_low": lo, "ci_high": hi})
+        _s = _shift_scale if pn == "shift" else 1.0
+        lsq_v = _lsq_lookup.get(pn)
+        ci_rows.append({
+            "param": pn,
+            "lsq":     lsq_v * _s if lsq_v is not None else float("nan"),
+            "ci_low":  lo   * _s if lo   is not None else float("nan"),
+            "ci_high": hi   * _s if hi   is not None else float("nan"),
+        })
     pd.DataFrame(ci_rows).to_string(fits_path / "profile_ci_bounds.txt", index=False)
 
     # --- corner plot ---
     # replace n_resp with alpha (= n_resp/(n_resp+1) * (1-beta)) for interpretability
-    _nr_lsq = lsq_vals.get("n_resp", float("nan"))
-    _beta_lsq = lsq_vals.get("beta", float("nan"))
-    _alpha_lsq = (_nr_lsq / (_nr_lsq + 1) * (1 - _beta_lsq)) if np.isfinite(_nr_lsq) and np.isfinite(_beta_lsq) else float("nan")
-    plot_cols = [("alpha" if pn == "n_resp" else pn) for pn in param_names]
-    plot_cols += (["r1"] if "r0" in param_names and "delta" in param_names else [])
+    # Paper order: A, tau_1, tau_2, beta, alpha, r0(r_D), w0(σ_D), r1(r_L), w1(σ_L)
+    # then any remaining scanned params (delta, shift) at the end
+    _raw_cols = [("alpha" if pn == "n_resp" else pn) for pn in param_names]
+    _raw_cols += (["r1"] if "r0" in param_names and "delta" in param_names else [])
+    _paper_order = ["A", "tau_1", "tau_2", "beta", "alpha", "r0", "w0", "r1", "w1"]
+    plot_cols = [p for p in _paper_order if p in _raw_cols]
+    plot_cols += [p for p in _raw_cols if p not in plot_cols]
     N = len(plot_cols)
+    # shift is stored as a fraction of half-field-range; convert to Gauss for display
+    _shift_scale = float(field_interp[-1] - field_interp[0]) / 2.0
     lsq_ref = {pn: lsq_vals.get(pn) for pn in plot_cols}
     lsq_ref["r1"] = lsq_vals.get("r0", 0) + lsq_vals.get("delta", 0)
     lsq_ref["alpha"] = _alpha_lsq
@@ -1212,11 +1297,13 @@ def do_profile_likelihood_matrix(
                     _df_diag = all_scans.get(_scan_key(row_name))
                     _diag_x_col = _scan_x_col(row_name)
                 if _df_diag is not None:
-                    ax.plot(_df_diag[_diag_x_col], _df_diag[_diag_col],
+                    _xs = _shift_scale if row_name == "shift" else 1.0
+                    x_data = _df_diag[_diag_x_col] * _xs
+                    ax.plot(x_data, _df_diag[_diag_col],
                             "o-", ms=3, lw=1, color="C0")
                     lsq_v = lsq_ref.get(row_name)
                     if lsq_v is not None:
-                        ax.axvline(lsq_v, ls="--", c="gray", lw=0.8)
+                        ax.axvline(lsq_v * _xs, ls="--", c="gray", lw=0.8)
                     data_max = _df_diag[_diag_col].max()
                     if threshold_val <= data_max * 1.5:
                         ax.axhline(threshold_val, ls=":", c="red", lw=0.8)
@@ -1227,29 +1314,28 @@ def do_profile_likelihood_matrix(
                                 transform=ax.transAxes, fontsize=4, va="top", color="red")
                     # ±1σ shaded band from parabola curvature (always shown when available)
                     sig_lo, sig_hi = sigma_bounds.get(row_name, (None, None))
-                    x_data = _df_diag[_diag_x_col]
                     x_lo_plot, x_hi_plot = float(x_data.min()), float(x_data.max())
                     if sig_lo is not None and sig_hi is not None:
-                        sl_clipped = max(sig_lo, x_lo_plot)
-                        sh_clipped = min(sig_hi, x_hi_plot)
+                        sl_clipped = max(sig_lo * _xs, x_lo_plot)
+                        sh_clipped = min(sig_hi * _xs, x_hi_plot)
                         if sl_clipped < sh_clipped:
                             ax.axvspan(sl_clipped, sh_clipped, alpha=0.12, color="C0", lw=0)
-                        ax.text(0.97, 0.95, r"$\pm1\sigma$" + f"\n[{sig_lo:.3g}, {sig_hi:.3g}]",
+                        ax.text(0.97, 0.95, r"$\pm1\sigma$" + f"\n[{sig_lo*_xs:.3g}, {sig_hi*_xs:.3g}]",
                                 transform=ax.transAxes, fontsize=3.5, va="top", ha="right",
                                 color="C0")
                     # CI crossing lines — only draw if within the plot x-range
                     ci_lo, ci_hi = ci_bounds.get(row_name, (None, None))
                     off_notes = []
                     if ci_lo is not None:
-                        if x_lo_plot <= ci_lo <= x_hi_plot:
-                            ax.axvline(ci_lo, ls="-", c="red", lw=0.8, alpha=0.7)
+                        if x_lo_plot <= ci_lo * _xs <= x_hi_plot:
+                            ax.axvline(ci_lo * _xs, ls="-", c="red", lw=0.8, alpha=0.7)
                         else:
-                            off_notes.append(f"lo={ci_lo:.3g}")
+                            off_notes.append(f"lo={ci_lo*_xs:.3g}")
                     if ci_hi is not None:
-                        if x_lo_plot <= ci_hi <= x_hi_plot:
-                            ax.axvline(ci_hi, ls="-", c="red", lw=0.8, alpha=0.7)
+                        if x_lo_plot <= ci_hi * _xs <= x_hi_plot:
+                            ax.axvline(ci_hi * _xs, ls="-", c="red", lw=0.8, alpha=0.7)
                         else:
-                            off_notes.append(f"hi={ci_hi:.3g}")
+                            off_notes.append(f"hi={ci_hi*_xs:.3g}")
                     if off_notes:
                         ax.text(0.05, 0.05, "CI " + ", ".join(off_notes) + "\n(off-plot)",
                                 transform=ax.transAxes, fontsize=4, va="bottom", color="red")
@@ -1287,10 +1373,270 @@ def do_profile_likelihood_matrix(
     fig.suptitle("Profile likelihood matrix", fontsize=10)
     fig.tight_layout()
     out_png = fits_path / "profile_likelihood_matrix.png"
-    fig.savefig(out_png, dpi=150)
+    fig.savefig(out_png, dpi=600)
     plt.close(fig)
     print(f"Saved matrix plot to {out_png}")
+
+    # --- publication profile grid: chi-sq diagonal panels only ---
+    _label_map = {
+        "A": r"$A$", "tau_1": r"$\tau_1$ (s)", "tau_2": r"$\tau_2$ (s)",
+        "beta": r"$\beta$", "alpha": r"$\alpha$",
+        "r0": r"$r_\mathrm{D}$ (nm)", "w0": r"$\sigma_\mathrm{D}$ (nm)",
+        "r1": r"$r_\mathrm{L}$ (nm)", "w1": r"$\sigma_\mathrm{L}$ (nm)",
+        "delta": r"$\Delta r$ (nm)", "shift": r"$\Delta B$ (G)",
+    }
+    _ncols_pub = min(N, 3)
+    _nrows_pub = (N + _ncols_pub - 1) // _ncols_pub
+    fig_pub, axes_pub = plt.subplots(
+        _nrows_pub, _ncols_pub,
+        figsize=(3.2 * _ncols_pub, 2.8 * _nrows_pub),
+    )
+    axes_pub_flat = np.array(axes_pub).flatten()
+
+    for _pi, row_name in enumerate(plot_cols):
+        ax = axes_pub_flat[_pi]
+        if row_name == "r1" and "delta" in all_scans:
+            _df_diag = all_scans["delta"]
+            _diag_x_col = "r1"
+        else:
+            _df_diag = all_scans.get(_scan_key(row_name))
+            _diag_x_col = _scan_x_col(row_name)
+        if _df_diag is None:
+            ax.set_visible(False)
+            continue
+        _xs = _shift_scale if row_name == "shift" else 1.0
+        x_data = _df_diag[_diag_x_col] * _xs
+        ax.plot(x_data, _df_diag["chisqr"], "o-", ms=3, lw=1, color="C0")
+        lsq_v = lsq_ref.get(row_name)
+        if lsq_v is not None:
+            ax.axvline(lsq_v * _xs, ls="--", c="gray", lw=0.8)
+        ax.axhline(threshold_val, ls=":", c="red", lw=0.9)
+        # CI vertical lines
+        ci_lo, ci_hi = ci_bounds.get(row_name, (None, None))
+        x_lo_plot, x_hi_plot = float(x_data.min()), float(x_data.max())
+        for _cv in (ci_lo, ci_hi):
+            if _cv is not None and x_lo_plot <= _cv * _xs <= x_hi_plot:
+                ax.axvline(_cv * _xs, ls="-", c="red", lw=0.8, alpha=0.7)
+        # ±1σ shaded band
+        sig_lo, sig_hi = sigma_bounds.get(row_name, (None, None))
+        if sig_lo is not None and sig_hi is not None:
+            sl_c = max(sig_lo * _xs, x_lo_plot)
+            sh_c = min(sig_hi * _xs, x_hi_plot)
+            if sl_c < sh_c:
+                ax.axvspan(sl_c, sh_c, alpha=0.12, color="C0", lw=0)
+        _data_max = float(_df_diag["chisqr"].max())
+        _data_min = float(_df_diag["chisqr"].min())
+        ax.set_ylim(bottom=_data_min * 0.999, top=max(_data_max, threshold_val) * 1.02)
+        ax.set_xlabel(_label_map.get(row_name, row_name), fontsize=9)
+        ax.set_ylabel(r"$\chi^2$", fontsize=9)
+        ax.tick_params(labelsize=7)
+
+    for _pi in range(N, len(axes_pub_flat)):
+        axes_pub_flat[_pi].set_visible(False)
+
+    fig_pub.tight_layout()
+    out_png_pub = fits_path / "profile_likelihood_profiles.png"
+    fig_pub.savefig(out_png_pub, dpi=600)
+    plt.close(fig_pub)
+    print(f"Saved profile grid to {out_png_pub}")
+
     return all_scans
+
+
+def do_profile_total_unfolded(
+    broadened_file, intrinsic_file, pake_patterns,
+    n_points=20, decimate_r=1, n_field=1024, skip_times=1,
+):
+    """Profile likelihood scan over total_unfolded = beta + alpha.
+
+    Fixes S = beta + alpha_frac*(1-beta) at each grid point by expressing
+    beta = S*(n_resp+1) - n_resp and letting n_resp vary freely.  Produces a
+    standalone chi-square vs S plot with CI bounds.
+    """
+    import ast
+
+    broadened_data = enforce_increasing_x_axis(pd.read_feather(broadened_file))
+    intrinsic_data = enforce_increasing_x_axis(pd.read_feather(intrinsic_file))
+    pake_df = pd.DataFrame(np.rot90(np.loadtxt(pake_patterns, delimiter=","), k=-1))
+    pake_df["B"] = 10 * (pake_df.iloc[:, -1] - np.mean(pake_df.iloc[:, -1]))
+    broadened_centered = return_centered_data(broadened_data)
+    intrinsic_centered = return_centered_data(intrinsic_data)
+    pake_df.loc[:, ~pake_df.columns.isin(["B", pake_df.columns[-2]])] /= np.max(
+        pake_df.loc[:, ~pake_df.columns.isin(["B", pake_df.columns[-2]])]
+    )
+    n = n_field
+    field = broadened_centered["B"]
+    field_interp, broadened_centered = interpolate(broadened_centered, field, n=n)
+    _, intrinsic_centered = interpolate(intrinsic_centered, field, n=n)
+    intrinsic_centered /= np.max(intrinsic_centered)
+    broadened_centered /= np.max(broadened_centered)
+    _, pake_arr = interpolate_pake(pake_df, field, n_reference=n)
+    pake_arr = pake_arr[:, :-1:][:, ::-1]
+    pake_arr = pake_arr / np.trapz(pake_arr, axis=0)[np.newaxis, :]
+    tscale = tscale_from_filename(broadened_file)
+    t = np.linspace(0, tscale * broadened_centered.shape[1], broadened_centered[:, ::skip_times].shape[1])
+    r_file = Path(pake_patterns).parent.joinpath("r-vals_" + Path(pake_patterns).stem + ".txt")
+    r = np.loadtxt(r_file, delimiter=",") if r_file.exists() else np.linspace(1, 7, pake_arr.shape[1])
+    if decimate_r > 1:
+        pake_arr = pake_arr[:, ::decimate_r]
+        r = r[::decimate_r]
+
+    fits_path = Path(broadened_file).parent / "fits"
+    fits_path.mkdir(exist_ok=True)
+
+    lsq_repr_path = fits_path / ".fit_params_lsq.repr"
+    if not lsq_repr_path.is_file():
+        print(f"No LSQ params found at {lsq_repr_path} — run LSQ first.")
+        return None
+    saved = ast.literal_eval(lsq_repr_path.read_text())
+    first_val = next(iter(saved.values()))
+    lsq_vals = {k: v["value"] for k, v in saved.items()} if isinstance(first_val, dict) else saved
+
+    sigma_noise, _noise_2d, _smooth_sigma = estimate_sigma_noise(
+        broadened_centered, field_interp,
+        save_path=fits_path / "noise_smooth_sigma_lcurve.png",
+    )
+    n_eff_total, _, _ = estimate_n_eff(
+        broadened_centered[:, ::skip_times], field=field_interp,
+        field_smooth_sigma=_smooth_sigma,
+    )
+    ref_params = create_fit_params(t)
+    for pname, pval in lsq_vals.items():
+        if pname in ref_params and ref_params[pname].vary and ref_params[pname].expr is None:
+            ref_params[pname].set(value=pval)
+    _lsq_resid = fit_function(
+        ref_params, broadened_centered[:, ::skip_times], pake_arr,
+        intrinsic_centered[:, 0], t, r, field_interp, sigma_noise=sigma_noise,
+    )
+    chi2_min_lsq = float(np.sum(_lsq_resid ** 2))
+    delta_chi2_threshold = 3.84 * chi2_min_lsq / n_eff_total
+    threshold_val = chi2_min_lsq + delta_chi2_threshold
+
+    _beta_lsq = lsq_vals.get("beta", float("nan"))
+    _nr_lsq = lsq_vals.get("n_resp", float("nan"))
+    _af_lsq = _nr_lsq / (_nr_lsq + 1) if np.isfinite(_nr_lsq) else float("nan")
+    _total_lsq = _beta_lsq + _af_lsq * (1 - _beta_lsq) if np.isfinite(_beta_lsq) and np.isfinite(_af_lsq) else 0.5
+
+    # S_lo = max(0.05, _total_lsq - 0.25)
+    S_lo = 0.25
+    # Upper bound: alpha's effective ceiling given the scan's nr_max and beta_min.
+    # Beyond this S, beta must absorb the remainder and rails against its 0.4 max.
+    _NR_MAX_SCAN = 200.0
+    _BETA_MIN = 1e-4
+    S_hi = (_NR_MAX_SCAN / (_NR_MAX_SCAN + 1.0)) * (1.0 - _BETA_MIN)  # ≈ 0.9949
+    # uniform grid over the bulk + log-spaced dense points up to S_hi
+    _S_uniform = np.linspace(S_lo, 0.94, max(4, n_points * 2 // 3))
+    _S_dense = S_hi - np.logspace(np.log10(S_hi - 0.94), np.log10(S_hi * 0.001), max(4, n_points // 2))
+    S_vals = np.unique(np.concatenate([_S_uniform, _S_dense]))
+    S_vals = S_vals[(S_vals >= S_lo) & (S_vals <= S_hi)]
+    fit_args = (broadened_centered[:, ::skip_times], pake_arr, intrinsic_centered[:, 0], t, r, field_interp)
+    param_names = [p.name for p in ref_params.values() if p.vary and p.expr is None]
+    print(f"\nProfiling total_unfolded (beta+alpha) over {len(S_vals)} points "
+          f"(LSQ={_total_lsq:.4f}, range=[{S_lo:.3f}, {S_hi:.4f}]) ...")
+
+    def _run_direction(vals, start_seed):
+        rows_d, prev_d = [], None
+        for S in vals:
+            S = float(S)
+            params_i = create_fit_params(t)
+            seed_d = prev_d if prev_d is not None else start_seed
+            for pn, pv in seed_d.items():
+                if pn in params_i and params_i[pn].vary and params_i[pn].expr is None and pn != "beta":
+                    params_i[pn].set(value=pv)
+            params_i["beta"].set(expr=f"{S:.8f}*(n_resp+1) - n_resp")
+            if S < 1.0:
+                nr_max = min(200.0, max(0.2, (S - 1e-4) / (1.0 - S) - 1e-4))
+            else:
+                nr_max = 200.0
+            nr_min = max(0.1, (S - 0.4) / max(1.0 - S, 1e-8) + 1e-4) if S > 0.4 else 0.1
+            if nr_min >= nr_max:
+                nr_min = max(0.1, nr_max * 0.5)
+            nr_warm = float(np.clip(
+                prev_d["n_resp"] if prev_d is not None else lsq_vals.get("n_resp", 1.0),
+                nr_min, nr_max,
+            ))
+            params_i["n_resp"].set(value=nr_warm, min=nr_min, max=nr_max)
+            try:
+                res = lmfit.minimize(
+                    fit_function, params_i, method="least_squares",
+                    args=fit_args, kws={"sigma_noise": sigma_noise},
+                    x_scale="jac", max_nfev=2000, xtol=1e-5, ftol=1e-5,
+                )
+                p = res.params.valuesdict()
+                bt = p.get("beta", float("nan"))
+                nr = p.get("n_resp", float("nan"))
+                af = nr / (nr + 1) if np.isfinite(nr) else float("nan")
+                al = af * (1 - bt) if np.isfinite(af) and np.isfinite(bt) else float("nan")
+                row = {"scan_val": S, "chisqr": res.chisqr, "beta": bt, "alpha": al}
+                for pn in param_names:
+                    row[pn] = p.get(pn, float("nan"))
+                prev_d = p
+                print(f"  S={S:.4f}  chisqr={res.chisqr:.6g}  beta={bt:.4f}  alpha={al:.4f}")
+            except Exception as e:
+                row = {"scan_val": S, "chisqr": float("nan"), "beta": float("nan"), "alpha": float("nan")}
+                for pn in param_names:
+                    row[pn] = float("nan")
+                print(f"  S={S:.4f}: failed ({e})")
+            rows_d.append(row)
+        return rows_d
+
+    S_below = sorted([v for v in S_vals if v <= _total_lsq], reverse=True)
+    S_above = sorted([v for v in S_vals if v > _total_lsq])
+    rows = sorted(
+        _run_direction(S_below, lsq_vals) + _run_direction(S_above, lsq_vals),
+        key=lambda r_: r_["scan_val"],
+    )
+    _lsq_al = float(_af_lsq * (1 - _beta_lsq)) if np.isfinite(_af_lsq) and np.isfinite(_beta_lsq) else float("nan")
+    rows.append({"scan_val": _total_lsq, "chisqr": chi2_min_lsq, "beta": _beta_lsq, "alpha": _lsq_al})
+    df = pd.DataFrame(sorted(rows, key=lambda r_: r_["scan_val"]))
+
+    # CI via threshold crossing
+    x = df["scan_val"].values
+    c = df["chisqr"].values
+    valid = np.isfinite(c)
+    x, c = x[valid], c[valid]
+    ci_lo = ci_hi = None
+    for i in range(len(c) - 1):
+        if (c[i] - threshold_val) * (c[i + 1] - threshold_val) < 0:
+            frac = (threshold_val - c[i]) / (c[i + 1] - c[i])
+            x_cross = x[i] + frac * (x[i + 1] - x[i])
+            if c[i] > threshold_val:
+                ci_lo = x_cross
+            else:
+                ci_hi = x_cross
+    lo_str = f"{ci_lo:.4f}" if ci_lo is not None else "<scan_min"
+    hi_str = f"{ci_hi:.4f}" if ci_hi is not None else ">scan_max"
+    print(f"\ntotal_unfolded  LSQ={_total_lsq:.4f}  CI=[{lo_str}, {hi_str}]  (95%, N_eff={n_eff_total:.0f})")
+
+    out_txt = fits_path / "profile_total_unfolded.txt"
+    with open(out_txt, "w") as fh:
+        fh.write(df.to_string(index=False))
+        fh.write(f"\n\n# Summary\n")
+        fh.write(f"# LSQ        = {_total_lsq:.6f}\n")
+        fh.write(f"# CI_low     = {lo_str}\n")
+        fh.write(f"# CI_high    = {hi_str}\n")
+        fh.write(f"# N_eff      = {n_eff_total:.1f}\n")
+        fh.write(f"# chi2_min   = {chi2_min_lsq:.6g}\n")
+        fh.write(f"# delta_chi2 = {delta_chi2_threshold:.6g}\n")
+
+    fig, ax = plt.subplots(figsize=(5, 3))
+    ax.plot(df["scan_val"], df["chisqr"], "o-", ms=4, lw=1.2)
+    ax.axhline(threshold_val, ls=":", c="red", lw=1,
+               label=f"95% CI threshold ($\\Delta\\chi^2$={delta_chi2_threshold:.2g})")
+    ax.axvline(_total_lsq, ls="--", c="gray", lw=0.9, label=f"LSQ = {_total_lsq:.3f}")
+    if ci_lo is not None:
+        ax.axvline(ci_lo, ls="-", c="red", lw=0.9, alpha=0.7, label=f"CI [{lo_str}, {hi_str}]")
+    if ci_hi is not None:
+        ax.axvline(ci_hi, ls="-", c="red", lw=0.9, alpha=0.7)
+    ax.set_xlabel(r"$\beta + \alpha$ (total unfolded)")
+    ax.set_ylabel(r"$\chi^2$")
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    out_png = fits_path / "profile_total_unfolded.png"
+    fig.savefig(out_png, dpi=600)
+    plt.close(fig)
+    print(f"Saved to {out_txt} and {out_png}")
+    return df
 
 
 def do_residual_bootstrap(
@@ -1329,7 +1675,7 @@ def do_residual_bootstrap(
     _, pake_arr = interpolate_pake(pake_df, field, n_reference=n)
     pake_arr = pake_arr[:, :-1:][:, ::-1]
     pake_arr = pake_arr / np.trapz(pake_arr, axis=0)[np.newaxis, :]
-    tscale = 25e3 / 23.5e3
+    tscale = tscale_from_filename(broadened_file)
     t = np.linspace(0, tscale * broadened_centered.shape[1], broadened_centered[:, ::skip_times].shape[1])
     r_file = Path(pake_patterns).parent.joinpath("r-vals_" + Path(pake_patterns).stem + ".txt")
     r = np.loadtxt(r_file, delimiter=",") if r_file.exists() else np.linspace(1, 7, pake_arr.shape[1])
@@ -1524,7 +1870,7 @@ def do_multistart(
     _, pake_arr = interpolate_pake(pake_df, field_col, n_reference=n)
     pake_arr = pake_arr[:, :-1:][:, ::-1]
     pake_arr = pake_arr / np.trapz(pake_arr, axis=0)[np.newaxis, :]
-    tscale = 25e3 / 23.5e3
+    tscale = tscale_from_filename(broadened_file)
     t = np.linspace(0, tscale * broadened_centered.shape[1], broadened_centered[:, ::skip_times].shape[1])
     r_file = Path(pake_patterns).parent.joinpath("r-vals_" + Path(pake_patterns).stem + ".txt")
     r = np.loadtxt(r_file, delimiter=",") if r_file.exists() else np.linspace(1, 7, pake_arr.shape[1])
@@ -1579,7 +1925,7 @@ def do_multistart(
                 args=(broadened_centered[:, ::skip_times], pake_arr, intrinsic_centered[:, 0], t, r, field_interp),
                 kws={"sigma_noise": sigma_noise},
                 x_scale="jac",
-                max_nfev=3000,
+                max_nfev=2000,
                 xtol=1e-5,
                 ftol=1e-5,
             )
@@ -1712,11 +2058,9 @@ def do_fitting(
             f"Parameters after load: {pd.DataFrame.from_dict(params.valuesdict(), orient='index')}",
         )
 
-    _t_on = params["t_on"].value
-    _t_off = params["t_off"].value
-    sigma_noise, _, _ = estimate_sigma_noise(broadened_data_centered, field, t=t, t_on=_t_on, t_off=_t_off, save_path=noise_save_path) if field is not None else (None, None, None)
+    sigma_noise, _, _ = estimate_sigma_noise(broadened_data_centered, field, save_path=noise_save_path) if field is not None else (None, None, None)
     if sigma_noise is not None:
-        print(f"Estimated σ_noise = {sigma_noise:.5f} (quiet regions: t < {_t_on:.0f} and t > {_t_off + 5:.0f} s)")
+        print(f"Estimated σ_noise = {sigma_noise:.5f}")
 
     # Initialize the plotter (UI)
     plotter = FitPlotter()
@@ -1808,9 +2152,7 @@ def do_emcee(
     thin=10,
 ):
     import os
-    _t_on = best_params["t_on"].value
-    _t_off = best_params["t_off"].value
-    sigma_noise, _, _ = estimate_sigma_noise(broadened_data_centered, field, t=t, t_on=_t_on, t_off=_t_off) if field is not None else (None, None, None)
+    sigma_noise, _, _ = estimate_sigma_noise(broadened_data_centered, field) if field is not None else (None, None, None)
     obj = lmfit.Minimizer(
         fit_function,
         best_params,
@@ -1908,7 +2250,7 @@ def main(
 
     # plt.show()
     # raise Exception
-    tscale = 25e3 / 23.5e3
+    tscale = tscale_from_filename(broadened_file)
     t = np.linspace(
         0,
         tscale * broadened_data_centered.shape[1],
@@ -2026,7 +2368,7 @@ def main(
                 if "r0" in fc.columns and "delta" in fc.columns:
                     all_samples["r1"] = derived["r1"]
                 fig_corner = corner.corner(all_samples, labels=all_samples.columns.tolist(), show_titles=True, title_fmt=".3g")
-                fig_corner.savefig(fits_path / "corner.png", dpi=100)
+                fig_corner.savefig(fits_path / "corner.png", dpi=600)
                 plt.close(fig_corner)
                 print(f"Corner plot saved to {fits_path / 'corner.png'}")
             except ImportError:
@@ -2191,7 +2533,7 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
     pake_data = pake_data[:, ::-1]
     pake_data = pake_data / np.trapz(pake_data, axis=0)[np.newaxis, :]
     skip_times = 1
-    tscale = 25e3 / 23.5e3
+    tscale = tscale_from_filename(broadened_file)
     t = np.linspace(0, tscale * broadened_data_centered.shape[1], broadened_data_centered[:, ::skip_times].shape[1])
     r_file = Path(pake_patterns).parent.joinpath("r-vals_" + Path(pake_patterns).stem + ".txt")
     r = np.loadtxt(r_file, delimiter=",") if r_file.exists() else np.linspace(1, 7, pake_data.shape[1])
@@ -2204,7 +2546,7 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
     mapr = axr.imshow(
         broadened_data_centered,
         aspect="auto",
-        extent=[np.min(t), np.max(t), np.max(pake_field), np.min(pake_field)],  # type: ignore
+        extent=[np.min(t), np.max(t), np.max(field_interp), np.min(field_interp)],  # type: ignore
         vmin=-0.05,
         vmax=1.05,
     )
@@ -2218,7 +2560,7 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
     mapf = axf.imshow(
         out,  # / np.max(out),
         aspect="auto",
-        extent=[np.min(t), np.max(t), np.max(pake_field), np.min(pake_field)],  # type: ignore
+        extent=[np.min(t), np.max(t), np.max(field_interp), np.min(field_interp)],  # type: ignore
         vmin=-0.05,
         vmax=1.05,
     )
@@ -2235,25 +2577,28 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
     residue = broadened_data_centered - out
 
     if find_noise:
-        smoothed_residue = gaussian_filter(residue, sigma=5)
-        result_str = f"sigma={np.std(smoothed_residue - residue)}"
+        # Show the noise actually used in fitting: raw data minus 1D field-axis smooth
+        _far_field_G = 10.0
+        _sigma_noise, _noise_2d, _ = estimate_sigma_noise(
+            broadened_data_centered, field_interp, far_field_G=_far_field_G
+        )
+        result_str = f"sigma={_sigma_noise:.6f}"
         Path(fits_path.joinpath("noise_after_smoothing.txt")).write_text(result_str)
 
         fig_res, ax_res = plt.subplots()
         map_res = ax_res.imshow(
-            smoothed_residue - residue,
+            _noise_2d,
             aspect="auto",
-            extent=[np.min(t), np.max(t), np.max(pake_field), np.min(pake_field)],  # type: ignore
-            # vmin=-0.1,
-            # vmax=0.1,
+            extent=[np.min(t), np.max(t), np.max(field_interp), np.min(field_interp)],
         )
+        # Shade the central region excluded from sigma / L-curve estimation
+        ax_res.axhspan(-_far_field_G, _far_field_G, color="white", alpha=0.12, linewidth=0)
+        for _yline in (-_far_field_G, _far_field_G):
+            ax_res.axhline(_yline, color="white", lw=0.8, ls="--", alpha=0.7)
         ax_res.set_xlabel("Time (s)")
         ax_res.set_ylabel("Field (G)")
-        cbar = fig_res.colorbar(
-            map_res,
-            ax=ax_res,
-        )
-        cbar.set_label("Amplitude (arb. u)", rotation=270, labelpad=15)
+        cbar = fig_res.colorbar(map_res, ax=ax_res)
+        cbar.set_label("Noise (data − field smooth, arb. u)", rotation=270, labelpad=15)
         fig_res.savefig(fits_path.joinpath("noise_after_smoothing.png"), dpi=1200)
         plt.close(fig_res)
 
@@ -2261,7 +2606,7 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
     map_res = ax_res.imshow(
         residue,
         aspect="auto",
-        extent=[np.min(t), np.max(t), np.max(pake_field), np.min(pake_field)],  # type: ignore
+        extent=[np.min(t), np.max(t), np.max(field_interp), np.min(field_interp)],  # type: ignore
         vmin=-0.1,
         vmax=0.1,
     )
@@ -2521,7 +2866,7 @@ class FittingWorker(QtCore.QThread):
             self.res = self.minimizer_obj.minimize(
                 method="least_squares",
                 x_scale="jac",
-                max_nfev=5000,
+                max_nfev=2000,
                 xtol=1e-8,
                 ftol=1e-8,
                 gtol=1e-8,
@@ -2680,11 +3025,8 @@ if __name__ == "__main__":
         "Data/2024/7/29/293 K/100mA_23.5kHz_pre30s_on10s_off230s_25000avgs_filtered_batchDecon.feather",
     )
     pake_patterns = Path(basepath).joinpath(
-        # "Code/dipolar averaging/tumbling_1-2_7-2_4mT_unlike-g_12.4ns_tcorr.txt",
-        # "Code/dipolar averaging/tumbling_7-2_7-2_8mT_like-g_12.4ns_tcorr.txt",
-        "Code/dipolar averaging/gaussian-kernel_8mT_12.4ns_tcorr.txt",
-        # "Code/dipolar averaging/pepper_1-2_7-2_30K_8mT_unlike-g_12.4ns_tcorr.txt",
-        # "Code/dipolar averaging/gaussian-rescaled-kernel_8mT_12.4ns_tcorr.txt",
+        # "Code/dipolar averaging/gaussian-kernel_8mT_12.4ns_tcorr.txt",
+        "Code/dipolar averaging/ft-kernel_30mT_12.4ns_tcorr.txt"
     )
 
     # Speedup kwargs applied to basinhopping/LSQ when REDUCE_COMPUTATION_SPEEDUP is set,
@@ -2698,7 +3040,7 @@ if __name__ == "__main__":
     _lsq_sub = "LSQ" if _production else "LSQ_fast"
     _map_sub = "MAP" if _production else "MAP_fast"
 
-    _skip_fitting = SKIP_TO_EMCEE or PROFILE_LIKELIHOOD or REPLOT_FROM_COMPARISON or RUN_BOOTSTRAP or RUN_MULTISTART or RUN_PROFILE_MATRIX
+    _skip_fitting = SKIP_TO_EMCEE or PROFILE_TAU or REPLOT_FROM_COMPARISON or RUN_BOOTSTRAP or RUN_MULTISTART or RUN_PROFILE_MATRIX or PROFILE_TOTAL_UNFOLDED or REPLOT_PROFILE_MATRIX
     if not _skip_fitting:
         if REFINE_FROM_SEED:
             # Skip basinhopping; copy the saved LSQ repr to the checkpoint so the local
@@ -2725,24 +3067,59 @@ if __name__ == "__main__":
 
     if RUN_PROFILE_MATRIX:
         do_profile_likelihood_matrix(broadened_f, intrinsic_f, pake_patterns, n_points=20, **_fast)
+    if REPLOT_PROFILE_MATRIX:
+        do_profile_likelihood_matrix(broadened_f, intrinsic_f, pake_patterns, replot=True, **_fast)
+    if PROFILE_TOTAL_UNFOLDED:
+        do_profile_total_unfolded(broadened_f, intrinsic_f, pake_patterns, n_points=20, **_fast)
     elif RUN_MULTISTART:
         do_multistart(broadened_f, intrinsic_f, pake_patterns, n_starts=50, **_fast)
     elif RUN_BOOTSTRAP:
         do_residual_bootstrap(broadened_f, intrinsic_f, pake_patterns, n_bootstrap=100, **_fast)
-    elif PROFILE_LIKELIHOOD:
-        profile_scan_params = {
-            # Coarse below the drop (~0.05–0.70), dense above 0.75 where chi-square changes rapidly
-            "alpha_frac": np.concatenate([
-                np.linspace(0.05, 0.70, 7),
-                np.linspace(0.75, 0.999, 12),
-            ]),
-            # Covers the well-constrained minimum; extend slightly past current LSQ to confirm upturn
-            "delta": np.linspace(0.5, 3.5, 14),
-            # Prior strength scan: watch w0, w1 vs tau_prior to calibrate against MD widths
-            "tau_prior": np.logspace(-1, 1.5, 20),  # 0.1 → ~32, log-spaced
-        }
-        for pname, pvals in profile_scan_params.items():
-            do_profile_likelihood(pname, pvals, broadened_f, intrinsic_f, pake_patterns, **_speedup)
+    elif PROFILE_TAU:
+        # Two-stage tau_prior scan: coarse pass to locate L-curve knee, then fine pass around it.
+        _TAU_MAX = 2.5  # above this r_0 rails at 2 nm
+        _coarse_grid = np.logspace(-2, np.log10(_TAU_MAX), 15)
+        print("\n=== tau_prior: Stage 1 (coarse) ===")
+        df_coarse = do_profile_likelihood(
+            "tau_prior", _coarse_grid, broadened_f, intrinsic_f, pake_patterns, **_speedup
+        )
+
+        _tau_knee = None
+        if df_coarse is not None and "prior_dev" in df_coarse.columns:
+            _df_lc = df_coarse.dropna(subset=["chisqr", "prior_dev"])
+            _taus_c = _df_lc["param_value"].values
+            _pdev_c = _df_lc["prior_dev"].values
+            _chi_c  = _df_lc["chisqr"].values
+            lx = np.log10(np.clip(_pdev_c, 1e-12, None))
+            ly = np.log10(np.clip(_chi_c,  1e-12, None))
+            lx_n = (lx - lx.min()) / (lx.max() - lx.min() + 1e-30)
+            ly_n = (ly - ly.min()) / (ly.max() - ly.min() + 1e-30)
+            _curv = np.full(len(lx_n), np.nan)
+            for _i in range(1, len(lx_n) - 1):
+                _x1, _y1 = lx_n[_i - 1], ly_n[_i - 1]
+                _x2, _y2 = lx_n[_i],     ly_n[_i]
+                _x3, _y3 = lx_n[_i + 1], ly_n[_i + 1]
+                _a2 = abs((_x2-_x1)*(_y3-_y1) - (_x3-_x1)*(_y2-_y1))
+                _d  = (np.hypot(_x2-_x1,_y2-_y1) * np.hypot(_x3-_x2,_y3-_y2)
+                       * np.hypot(_x3-_x1,_y3-_y1))
+                _curv[_i] = _a2 / _d if _d > 1e-30 else 0.0
+            _tau_knee = float(_taus_c[int(np.nanargmax(_curv))])
+            print(f"Coarse L-curve knee: tau_prior = {_tau_knee:.4g}")
+
+        print("\n=== tau_prior: Stage 2 (fine around knee) ===")
+        _fine_grid = (
+            np.logspace(
+                np.log10(max(_tau_knee / 6, 0.005)),
+                np.log10(min(_tau_knee * 6, _TAU_MAX)),
+                25,
+            )
+            if _tau_knee is not None
+            else np.logspace(-0.25, 1.25, 25)
+        )
+        _combined = np.unique(np.concatenate([_coarse_grid, _fine_grid]))
+        do_profile_likelihood(
+            "tau_prior", _combined, broadened_f, intrinsic_f, pake_patterns, **_speedup
+        )
     elif REPLOT_FROM_COMPARISON:
         if not comparison_file.is_file():
             print(f"No comparison file found at {comparison_file} — run emcee first.")
