@@ -672,7 +672,7 @@ Printed as: <code>chi2_min(LSQ) = X.XXX  Δchi2_threshold(95%) = X.XXX</code>.</
 <pre>SKIP_TO_EMCEE       = False
 REDUCE_COMPUTATION_SPEEDUP = True   # coarse r-grid, fewer field/time points
 RUN_PROFILE_MATRIX  = False
-PROFILE_LIKELIHOOD  = False
+PROFILE_TAU  = False
 REFINE_FROM_SEED    = False</pre>
 <p>Run the script. The pipeline is:</p>
 <ol>
@@ -703,7 +703,7 @@ coarse grid makes this run fast.</p>
 <p>Set flags:</p>
 <pre>SKIP_TO_EMCEE      = False
 REDUCE_COMPUTATION_SPEEDUP = True   # fast is fine for this scan
-PROFILE_LIKELIHOOD = True           # runs the tau_prior L-curve scan</pre>
+PROFILE_TAU = True           # runs the tau_prior L-curve scan</pre>
 <p>The script loads the LSQ result from Step 1, then scans <code>tau_prior</code>
 over a log-spaced range (typically $10^{-1}$ to $10^2$). At each value it re-runs the
 LSQ and records:
@@ -726,7 +726,7 @@ data — investigate before proceeding.</p>
 <p>Set flags:</p>
 <pre>SKIP_TO_EMCEE       = False
 REDUCE_COMPUTATION_SPEEDUP = False  # full r-grid, full field/time resolution
-PROFILE_LIKELIHOOD  = False
+PROFILE_TAU  = False
 RUN_PROFILE_MATRIX  = False
 REFINE_FROM_SEED    = False</pre>
 <p>Run the script. Basinhopping + LSQ at full resolution. Output goes to
@@ -805,7 +805,7 @@ REDUCE_COMPUTATION_SPEEDUP = False</pre>
   <tr><th>Flag</th><th>Type</th><th>Effect</th></tr>
   <tr><td><code>SKIP_TO_EMCEE</code></td><td>bool</td><td>Skip basinhopping + LSQ; load saved <code>.fit_params_lsq.repr</code> directly. Set <code>True</code> for Step 4.</td></tr>
   <tr><td><code>REDUCE_COMPUTATION_SPEEDUP</code></td><td>bool</td><td>Coarser r-grid and fewer field/time points for speed. Always <code>False</code> for production fits and profiles.</td></tr>
-  <tr><td><code>PROFILE_LIKELIHOOD</code></td><td>bool</td><td>Runs 1D $\tau_\text{prior}$ L-curve scan (Step 2). Independent of <code>RUN_PROFILE_MATRIX</code>.</td></tr>
+  <tr><td><code>PROFILE_TAU</code></td><td>bool</td><td>Runs 1D $\tau_\text{prior}$ L-curve scan (Step 2). Independent of <code>RUN_PROFILE_MATRIX</code>.</td></tr>
   <tr><td><code>RUN_PROFILE_MATRIX</code></td><td>bool</td><td>Runs the full corner-plot CI scan over all free parameters (Step 4).</td></tr>
   <tr><td><code>REFINE_FROM_SEED</code></td><td>bool</td><td>Skip basinhopping; seed LSQ from saved <code>.fit_params_lsq.repr</code>. Use after a <code>!!!</code> warning.</td></tr>
   <tr><td><code>TAU_PRIOR</code></td><td>float</td><td>Prior strength; read from L-curve corner (Step 2). Dataset-specific.</td></tr>

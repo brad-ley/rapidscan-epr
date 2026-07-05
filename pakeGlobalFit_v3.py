@@ -22,8 +22,8 @@ SKIP_TO_EMCEE = False  # set True to skip basinhopping+lsq and go straight to em
 RUN_EMCEE = False       # set False to skip emcee and plot using saved LSQ params
 LONG_EMCEE = False      # set True to run a long emcee run (default is short test values)
 REPLOT_FROM_COMPARISON = False  # set True to skip all fitting and regenerate plots from emcee_comparison.txt
-PROFILE_TAU = True  # set True to run profile likelihood scan over alpha_frac and delta
-RUN_PROFILE_MATRIX = False   # set True to run profile likelihood matrix / corner plot
+PROFILE_TAU = False  # set True to run profile likelihood scan over alpha_frac and delta
+RUN_PROFILE_MATRIX = True   # set True to run profile likelihood matrix / corner plot
 REPLOT_PROFILE_MATRIX = False  # set True to regenerate plots/CI from saved profile_matrix_scans.txt (no re-scan)
 PROFILE_TOTAL_UNFOLDED = False  # set True to profile beta+alpha as a single quantity
 REDUCE_COMPUTATION_SPEEDUP = False  # set True to use reduced r-grid/field/time resolution for basinhopping and LSQ as well
@@ -333,52 +333,119 @@ def estimate_sigma_noise(data, field, field_smooth_sigma=None, far_field_G=10.0,
     return sigma_val, noise_2d, float(field_smooth_sigma)
 
 
-def estimate_n_eff(data_2d, field=None, field_smooth_sigma=1.5, n_time_independent=3,
-                   save_path=None):
-    """Estimate effective sample size from field-axis noise autocorrelation.
-
-    Subtracts a 1D Gaussian smooth along the field axis to isolate noise, then
-    averages the field-axis ACF over all time slices. Uses the full dataset since
-    the field-axis correlation length is a spectrometer property independent of
-    whether EPR signal is present.
-
-    N_eff = N_eff_field * n_time_independent
-    """
-    data_2d = np.asarray(data_2d, dtype=float)
-    n_field, n_time = data_2d.shape
-
-    if field is not None:
-        field_arr = np.asarray(field)
-        field_range = float(field_arr[-1] - field_arr[0])
-        field_spacing = field_range / (n_field - 1)
-        sigma_pts = field_smooth_sigma / field_spacing
-    else:
-        field_spacing = 1.0
-        sigma_pts = n_field * 0.03
-
-    noise_2d = data_2d - gaussian_filter1d(data_2d, sigma=sigma_pts, axis=0)
-    n_field, n_time = noise_2d.shape
-
-    acf_mean = np.zeros(n_field)
+def _acf_rho_sum(rows_2d):
+    """Mean zero-lag-normalized field-axis ACF for a contiguous block of rows,
+    averaged over all time columns, and its zero-crossing rho_sum
+    (1 + 2*sum(rho_k) up to the first lag where the ACF goes <= 0)."""
+    n_rows = rows_2d.shape[0]
+    acf = np.zeros(n_rows)
     n_valid = 0
-    for j in range(n_time):
-        col = noise_2d[:, j].astype(float)
+    for j in range(rows_2d.shape[1]):
+        col = rows_2d[:, j].astype(float)
         col -= col.mean()
         var = np.dot(col, col)
         if var < 1e-30:
             continue
         full = np.correlate(col, col, mode="full")
-        acf_mean += full[n_field - 1:] / var
+        acf += full[n_rows - 1:] / var
         n_valid += 1
     if n_valid == 0:
-        return float(n_field * n_time_independent), float(n_field), np.ones(n_field)
-    acf_mean /= n_valid
+        return np.ones(n_rows), 1.0, 0
+    acf /= n_valid
+    # np.argmax on a boolean array is ambiguous: it returns 0 both when the
+    # first element is True and when none are -- "if zc > 0 else n_rows"
+    # would then wrongly treat an immediate (lag-1) zero-crossing as "never
+    # crosses," inflating rho_sum. np.flatnonzero has no such ambiguity.
+    below = np.flatnonzero(acf[1:] <= 0)
+    cutoff = int(below[0]) + 1 if below.size > 0 else n_rows
+    rho_sum = 1.0 + 2.0 * acf[1:cutoff].sum()
+    return acf, rho_sum, n_valid
 
-    zc = np.argmax(acf_mean[1:] <= 0)
-    cutoff = int(zc) if zc > 0 else n_field
-    rho_sum = 1.0 + 2.0 * acf_mean[1:cutoff].sum()
+
+def estimate_n_eff(data_2d=None, field=None, field_smooth_sigma=1.5, n_time_independent=3,
+                   save_path=None, far_field_G=None, noise_2d=None):
+    """Estimate effective sample size from field-axis noise autocorrelation.
+
+    Subtracts a 1D Gaussian smooth along the field axis to isolate noise, then
+    averages the field-axis ACF over all time slices. By default uses the
+    full dataset, since the field-axis correlation length is nominally a
+    spectrometer property independent of whether EPR signal is present --
+    but that assumption only holds if the smoothing subtraction is a good
+    model of the signal everywhere, including right at the peak.
+
+    Pass a precomputed noise_2d (the "data - smooth" array estimate_sigma_noise
+    already returns) instead of data_2d to reuse that noise estimate directly,
+    rather than recomputing an essentially identical Gaussian-filtered
+    subtraction a second time with the same field_smooth_sigma -- sigma_noise
+    and N_eff should be measuring noise from the same underlying array.
+
+    If far_field_G is given, an additional wings-only estimate
+    (|field| > far_field_G, matching estimate_sigma_noise's mask) is computed
+    as a check: the wings are split into their contiguous segments (so
+    correlate() never sees a discontiguous, peak-excised series), each
+    segment's rho_sum is computed separately and averaged (length-weighted),
+    then applied to the full n_field to get a contamination-free N_eff. A
+    large gap between the full-width and wings-only numbers means the smooth
+    is leaving real signal-shape residual in "noise_2d" near the peak,
+    inflating the apparent correlation length there.
+
+    N_eff = N_eff_field * n_time_independent
+
+    Returns (n_eff_total, n_eff_field, acf_mean) when far_field_G is None;
+    (n_eff_total, n_eff_field, acf_mean, n_eff_total_wings, n_eff_field_wings)
+    when far_field_G is given (either wings value is None if too few far-field
+    rows are available to estimate a rho_sum).
+    """
+    field_arr = np.asarray(field) if field is not None else None
+
+    if noise_2d is None:
+        data_2d = np.asarray(data_2d, dtype=float)
+        n_field = data_2d.shape[0]
+        if field_arr is not None:
+            sigma_pts = field_smooth_sigma / (float(field_arr[-1] - field_arr[0]) / (n_field - 1))
+        else:
+            sigma_pts = n_field * 0.03
+        noise_2d = data_2d - gaussian_filter1d(data_2d, sigma=sigma_pts, axis=0)
+    else:
+        noise_2d = np.asarray(noise_2d, dtype=float)
+    n_field, n_time = noise_2d.shape
+    field_spacing = float(field_arr[-1] - field_arr[0]) / (n_field - 1) if field_arr is not None else 1.0
+
+    acf_mean, rho_sum, n_valid = _acf_rho_sum(noise_2d)
+    if n_valid == 0:
+        return float(n_field * n_time_independent), float(n_field), acf_mean
+    below = np.flatnonzero(acf_mean[1:] <= 0)
+    cutoff = int(below[0]) + 1 if below.size > 0 else n_field
     n_eff_field = n_field / rho_sum
     n_eff_total = n_eff_field * n_time_independent
+
+    n_eff_total_wings = n_eff_field_wings = None
+    if far_field_G is not None and field_arr is not None:
+        far_idx = np.where(np.abs(field_arr) > far_field_G)[0]
+        if far_idx.size > 2:
+            breaks = np.where(np.diff(far_idx) > 1)[0] + 1
+            rho_sums, weights = [], []
+            for seg in np.split(far_idx, breaks):
+                if len(seg) < 3:
+                    continue
+                _, rho_seg, _ = _acf_rho_sum(noise_2d[seg, :])
+                rho_sums.append(rho_seg)
+                weights.append(len(seg))
+            if rho_sums:
+                rho_sum_wings = float(np.average(rho_sums, weights=weights))
+                n_eff_field_wings = n_field / rho_sum_wings
+                n_eff_total_wings = n_eff_field_wings * n_time_independent
+                flag = (
+                    "  <-- discrepancy suggests peak-region residual structure "
+                    "inflating the full-width correlation length"
+                    if abs(n_eff_total - n_eff_total_wings)
+                    > 0.25 * max(n_eff_total, n_eff_total_wings)
+                    else ""
+                )
+                print(
+                    f"  N_eff check: full-width={n_eff_total:.1f}  "
+                    f"wings-only(|B|>{far_field_G:g}G)={n_eff_total_wings:.1f}{flag}"
+                )
 
     if save_path is not None:
         lags = np.arange(n_field) * field_spacing
@@ -403,7 +470,29 @@ def estimate_n_eff(data_2d, field=None, field_smooth_sigma=1.5, n_time_independe
         plt.close(fig)
         print(f"  Saved ACF plot to {save_path}")
 
+    if far_field_G is not None:
+        return (
+            float(n_eff_total), float(n_eff_field), acf_mean,
+            n_eff_total_wings, n_eff_field_wings,
+        )
     return float(n_eff_total), float(n_eff_field), acf_mean
+
+
+def _prefer_wings_n_eff(n_eff_total, n_eff_field, n_eff_total_wings, n_eff_field_wings):
+    """Prefer the wings-only N_eff over the full-width one when available: the
+    full-width estimate is only valid if the background-subtraction smooth
+    leaves no real signal-shape residual near the peak, and that assumption
+    can fail badly (residual structure inflates the apparent field-axis
+    correlation length, deflating N_eff and over-widening every CI). The
+    wings-only estimate, computed from field rows far from any signal, is
+    immune to that failure mode."""
+    if n_eff_total_wings is not None and n_eff_field_wings is not None:
+        print(
+            f"  Using wings-only N_eff={n_eff_total_wings:.1f} in place of "
+            f"full-width N_eff={n_eff_total:.1f} (see N_eff check above)"
+        )
+        return n_eff_total_wings, n_eff_field_wings
+    return n_eff_total, n_eff_field
 
 
 def fit_function(
@@ -650,8 +739,11 @@ def do_profile_likelihood(param_name, param_values, broadened_file, intrinsic_fi
     for pname, pval in lsq_vals.items():
         if pname in _lsq_params and _lsq_params[pname].expr is None:
             _lsq_params[pname].set(value=pval)
-    n_eff_total, n_eff_col, _acf = estimate_n_eff(broadened_centered[:, ::skip_times], field=field_interp, field_smooth_sigma=_smooth_sigma,
-                                                   save_path=fits_path / "noise_acf.png")
+    n_eff_total, n_eff_col, _acf, _n_eff_total_w, _n_eff_col_w = estimate_n_eff(
+        noise_2d=_noise_2d[:, ::skip_times], field=field_interp,
+        save_path=fits_path / "noise_acf.png", far_field_G=10.0,
+    )
+    n_eff_total, n_eff_col = _prefer_wings_n_eff(n_eff_total, n_eff_col, _n_eff_total_w, _n_eff_col_w)
     print(f"N_eff = {n_eff_total:.1f}  (N_eff_field={n_eff_col:.1f} × N_eff_time=3 fixed)")
     # best-fit chi-square: re-evaluate at LSQ params
     _lsq_resid = fit_function(
@@ -924,8 +1016,11 @@ def do_profile_likelihood_matrix(
             ref_params[pname].set(value=pval)
 
     # --- N_eff and chi-square threshold ---
-    n_eff_total, n_eff_field, _acf = estimate_n_eff(broadened_centered[:, ::skip_times], field=field_interp, field_smooth_sigma=_smooth_sigma,
-                                                    save_path=fits_path / "noise_acf.png")
+    n_eff_total, n_eff_field, _acf, _n_eff_total_w, _n_eff_field_w = estimate_n_eff(
+        noise_2d=_noise_2d[:, ::skip_times], field=field_interp,
+        save_path=fits_path / "noise_acf.png", far_field_G=10.0,
+    )
+    n_eff_total, n_eff_field = _prefer_wings_n_eff(n_eff_total, n_eff_field, _n_eff_total_w, _n_eff_field_w)
     _lsq_resid = fit_function(
         ref_params, broadened_centered[:, ::skip_times], pake_arr,
         intrinsic_centered[:, 0], t, r, field_interp, sigma_noise=sigma_noise,
@@ -988,20 +1083,36 @@ def do_profile_likelihood_matrix(
         print(f"\nProfiling {scan_pname} over {len(scan_vals)} points (bi-directional from {ref_val:.4g}) ...")
 
         def _run_direction(vals, start_seed):
-            rows_d, prev_d = [], None
-            for val in vals:
+            def _fit_from(seed):
                 params_i = create_fit_params(t)
-                seed_d = prev_d if prev_d is not None else start_seed
-                for pn, pv in seed_d.items():
+                for pn, pv in seed.items():
                     if pn in params_i and params_i[pn].vary and params_i[pn].expr is None:
                         params_i[pn].set(value=pv)
                 params_i[scan_pname].set(value=float(val), vary=False)
+                return lmfit.minimize(
+                    fit_function, params_i, method="least_squares",
+                    args=fit_args, kws={"sigma_noise": sigma_noise},
+                    x_scale="jac", max_nfev=2000, xtol=1e-5, ftol=1e-5,
+                )
+
+            rows_d, prev_d, prev_chisqr = [], None, chi2_min_lsq
+            for val in vals:
+                seed_d = prev_d if prev_d is not None else start_seed
                 try:
-                    res = lmfit.minimize(
-                        fit_function, params_i, method="least_squares",
-                        args=fit_args, kws={"sigma_noise": sigma_noise},
-                        x_scale="jac", max_nfev=2000, xtol=1e-5, ftol=1e-5,
-                    )
+                    res = _fit_from(seed_d)
+                    # Guard against a poisoned warm-start basin: if this step's
+                    # chi-square spiked far above both the LSQ minimum and the
+                    # previous accepted point, the local optimizer likely got
+                    # stuck rather than the profile genuinely jumping -- retry
+                    # from the original LSQ params. Without this, a single bad
+                    # step poisons prev_d and every subsequent warm-started
+                    # point in this direction inherits the bad basin, showing
+                    # up as a sustained "spike" near the minimum that
+                    # _find_ci_bounds can mistake for the true CI edge.
+                    if seed_d is not start_seed and res.chisqr > 3.0 * max(prev_chisqr, chi2_min_lsq):
+                        res_retry = _fit_from(start_seed)
+                        if res_retry.chisqr < res.chisqr:
+                            res = res_retry
                     p = res.params.valuesdict()
                     row = {"scan_val": val, "chisqr": res.chisqr}
                     for pn in param_names:
@@ -1012,6 +1123,7 @@ def do_profile_likelihood_matrix(
                     af = nr / (nr + 1) if np.isfinite(nr) else float("nan")
                     row["alpha"] = af * (1 - bt) if np.isfinite(af) and np.isfinite(bt) else float("nan")
                     prev_d = p
+                    prev_chisqr = res.chisqr
                 except Exception as e:
                     row = {"scan_val": val, "chisqr": float("nan")}
                     for pn in param_names:
@@ -1118,16 +1230,25 @@ def do_profile_likelihood_matrix(
         i_min = int(np.argmin(c))
 
         # --- direct interpolation ---
+        # Walk outward from the minimum on each side and stop at the *first*
+        # threshold crossing. Scanning the whole array and letting later
+        # crossings overwrite earlier ones (the old behavior) means a single
+        # spurious spike -- e.g. from a profile-scan step whose local refit
+        # got stuck -- anywhere past the true edge silently replaces the
+        # correct bound with a wrong (usually far too narrow) one.
         lower, upper = None, None
-        for i in range(len(c) - 1):
+        for i in range(i_min, 0, -1):
+            if (c[i] - threshold_val) * (c[i - 1] - threshold_val) < 0:
+                frac = (threshold_val - c[i]) / (c[i - 1] - c[i])
+                xi_cross = xi[i] + frac * (xi[i - 1] - xi[i])
+                lower = 10 ** xi_cross if log_x else xi_cross
+                break
+        for i in range(i_min, len(c) - 1):
             if (c[i] - threshold_val) * (c[i + 1] - threshold_val) < 0:
                 frac = (threshold_val - c[i]) / (c[i + 1] - c[i])
                 xi_cross = xi[i] + frac * (xi[i + 1] - xi[i])
-                x_cross = 10 ** xi_cross if log_x else xi_cross
-                if c[i] > threshold_val:
-                    lower = x_cross
-                else:
-                    upper = x_cross
+                upper = 10 ** xi_cross if log_x else xi_cross
+                break
 
         # --- parabola fit: CI fallback + always compute ±1σ from curvature ---
         sigma_lo = sigma_hi = None
@@ -1249,8 +1370,9 @@ def do_profile_likelihood_matrix(
     # --- corner plot ---
     # replace n_resp with alpha (= n_resp/(n_resp+1) * (1-beta)) for interpretability
     # Paper order: A, tau_1, tau_2, beta, alpha, r0(r_D), w0(σ_D), r1(r_L), w1(σ_L)
-    # then any remaining scanned params (delta, shift) at the end
-    _raw_cols = [("alpha" if pn == "n_resp" else pn) for pn in param_names]
+    # then any remaining scanned params (shift) at the end -- delta is dropped
+    # from the grid since r1 (= r0 + delta) is shown in its place
+    _raw_cols = [("alpha" if pn == "n_resp" else pn) for pn in param_names if pn != "delta"]
     _raw_cols += (["r1"] if "r0" in param_names and "delta" in param_names else [])
     _paper_order = ["A", "tau_1", "tau_2", "beta", "alpha", "r0", "w0", "r1", "w1"]
     plot_cols = [p for p in _paper_order if p in _raw_cols]
@@ -1496,10 +1618,10 @@ def do_profile_total_unfolded(
         broadened_centered, field_interp,
         save_path=fits_path / "noise_smooth_sigma_lcurve.png",
     )
-    n_eff_total, _, _ = estimate_n_eff(
-        broadened_centered[:, ::skip_times], field=field_interp,
-        field_smooth_sigma=_smooth_sigma,
+    n_eff_total, n_eff_field, _acf, _n_eff_total_w, _n_eff_field_w = estimate_n_eff(
+        noise_2d=_noise_2d[:, ::skip_times], field=field_interp, far_field_G=10.0,
     )
+    n_eff_total, n_eff_field = _prefer_wings_n_eff(n_eff_total, n_eff_field, _n_eff_total_w, _n_eff_field_w)
     ref_params = create_fit_params(t)
     for pname, pval in lsq_vals.items():
         if pname in ref_params and ref_params[pname].vary and ref_params[pname].expr is None:
@@ -3026,7 +3148,7 @@ if __name__ == "__main__":
     )
     pake_patterns = Path(basepath).joinpath(
         # "Code/dipolar averaging/gaussian-kernel_8mT_12.4ns_tcorr.txt",
-        "Code/dipolar averaging/ft-kernel_30mT_12.4ns_tcorr.txt"
+        "Code/dipolar averaging/ft-kernel_30mT_13ns_tcorr.txt"
     )
 
     # Speedup kwargs applied to basinhopping/LSQ when REDUCE_COMPUTATION_SPEEDUP is set,

@@ -150,7 +150,7 @@ if __name__ == "__main__":
 def main(out_dir):
     n_r = 256
     r = np.linspace(1.0, 7.0, n_r)  # nm
-    tau_c = 12.4e-9  # s
+    tau_c = 13.0e-9  # s
     b = np.arange(-15.0, 15.0 + 1e-9, 0.001)  # mT
 
     g = 1.992

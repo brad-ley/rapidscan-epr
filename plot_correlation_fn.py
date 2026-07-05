@@ -193,6 +193,35 @@ def second_moment(field_gauss, intensity):
     return m2
 
 
+def fwhm(field, intensity):
+    """Full width at half maximum (Gauss), found by linear interpolation
+    across the half-max crossing points nearest the peak. O(n), cheap
+    enough to recompute on every slider tick."""
+    peak = intensity.max()
+    half = peak / 2.0
+    peak_idx = int(np.argmax(intensity))
+
+    below_left = np.where(intensity[:peak_idx] < half)[0]
+    if below_left.size == 0:
+        left = field[0]
+    else:
+        i = below_left[-1]
+        x0, x1 = field[i], field[i + 1]
+        y0, y1 = intensity[i], intensity[i + 1]
+        left = x0 + (half - y0) * (x1 - x0) / (y1 - y0)
+
+    below_right = np.where(intensity[peak_idx:] < half)[0]
+    if below_right.size == 0:
+        right = field[-1]
+    else:
+        j = peak_idx + below_right[0]
+        x0, x1 = field[j - 1], field[j]
+        y0, y1 = intensity[j - 1], intensity[j]
+        right = x0 + (half - y0) * (x1 - x0) / (y1 - y0)
+
+    return right - left
+
+
 U = np.linspace(-10, 10, 4000)
 NU0 = 1.0  # MHz
 TAU_C0 = 1.0  # ns
@@ -236,7 +265,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.plot_f.showGrid(x=True, y=True, alpha=0.3)
         self.plot_f.setXRange(-FIELD_HALF_RANGE_G, FIELD_HALF_RANGE_G)
         self.plot_f.addLine(x=0, pen=pg.mkPen((128, 128, 128), style=QtCore.Qt.PenStyle.DashLine))
-        self.plot_f.addLegend()
+        self.legend = self.plot_f.addLegend()
         self.curve_gauss = self.plot_f.plot(
             pen=pg.mkPen((150, 150, 150), width=1.5, style=QtCore.Qt.PenStyle.DashLine),
             name="Gaussian limit (ω only)",
@@ -305,6 +334,11 @@ class MainWindow(QtWidgets.QMainWindow):
         field, intensity = spectrum(omega, tau_c)
         self.curve_full.setData(field, intensity)
 
+        fwhm_full = fwhm(field, intensity)
+        fwhm_gauss = fwhm(field_g, i_g)
+        self.legend.items[0][1].setText(f"Gaussian limit (ω only), FWHM={fwhm_gauss:.4g} G")
+        self.legend.items[1][1].setText(f"I(ΔB), FWHM={fwhm_full:.4g} G")
+
         self._current = (nu, tau_ns, field, intensity, field_g, i_g)
 
     def export(self):
@@ -318,24 +352,30 @@ class MainWindow(QtWidgets.QMainWindow):
         if not path.lower().endswith(".png"):
             path += ".png"
 
+        m2_full = second_moment(field, intensity)
+        m2_gauss = second_moment(field_g, i_g)
+        fwhm_full = fwhm(field, intensity)
+        fwhm_gauss = fwhm(field_g, i_g)
+
         fig, ax = plt.subplots(figsize=(6, 4.5))
         ax.plot(
             field_g, i_g, ls="--", color="gray", alpha=0.7,
-            label=r"Gaussian limit ($\omega$ only)",
+            label=rf"Gaussian limit ($\omega$ only), FWHM={fwhm_gauss:.4g} G",
         )
-        ax.plot(field, intensity, color="tab:orange", label=r"$I(\Delta B)$")
+        ax.plot(
+            field, intensity, color="tab:orange",
+            label=rf"$I(\Delta B)$, FWHM={fwhm_full:.4g} G",
+        )
         ax.axvline(0, color="gray", lw=0.8, ls="--", alpha=0.5)
         ax.set_xlim(-FIELD_HALF_RANGE_G, FIELD_HALF_RANGE_G)
         ax.set_xlabel(r"$\Delta B$ (G)")
         ax.set_ylabel(r"$I(\Delta B)$")
         ax.set_title(rf"$\nu={nu:g}$ MHz, $\tau_c={tau_ns:g}$ ns")
-        ax.legend()
+        ax.legend(fontsize=8)
         fig.tight_layout()
         fig.savefig(path, dpi=300)
         plt.close(fig)
 
-        m2_full = second_moment(field, intensity)
-        m2_gauss = second_moment(field_g, i_g)
         txt_path = path[:-4] + ".txt"
         with open(txt_path, "w") as f:
             f.write(f"nu (MHz): {nu:.6g}\n")
@@ -343,6 +383,8 @@ class MainWindow(QtWidgets.QMainWindow):
             f.write(f"field window (G): +/-{FIELD_HALF_RANGE_G:g}\n")
             f.write(f"second_moment_full (G^2): {m2_full:.6g}\n")
             f.write(f"second_moment_gaussian_reference (G^2): {m2_gauss:.6g}\n")
+            f.write(f"fwhm_full (G): {fwhm_full:.6g}\n")
+            f.write(f"fwhm_gaussian_reference (G): {fwhm_gauss:.6g}\n")
 
         self.status_label.setText(f"Exported .png and .txt")
 

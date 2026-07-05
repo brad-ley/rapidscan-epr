@@ -49,25 +49,27 @@ def temperature_from_dirname(name):
 
 def collect(base_dir):
     base = Path(base_dir)
-    temps, offsets, offset_errs, labels = [], [], [], []
+    temps, offsets, offset_errs, amplitudes, labels = [], [], [], [], []
     for fit_file in sorted(base.glob("*/LWfit-values.txt")):
         dirname = fit_file.parent.name
         try:
             temp = temperature_from_dirname(dirname)
         except ValueError:
             continue
-        offset, _, _, offset_ci, _, _ = parse_lwfit_values(fit_file)
+        offset, amplitude, _, offset_ci, _, _ = parse_lwfit_values(fit_file)
         temps.append(temp)
         offsets.append(offset)
         offset_errs.append(offset_ci)
+        amplitudes.append(amplitude)
         labels.append(dirname)
 
     order = np.argsort(temps)
     temps = np.array(temps)[order]
     offsets = np.array(offsets)[order]
     offset_errs = np.array(offset_errs)[order]
+    amplitudes = np.array(amplitudes)[order]
     labels = [labels[i] for i in order]
-    return temps, offsets, offset_errs, labels
+    return temps, offsets, offset_errs, amplitudes, labels
 
 
 def day_label(base_dir):
@@ -77,20 +79,22 @@ def day_label(base_dir):
 
 
 def collect_multiple(base_dirs):
-    all_temps, all_offsets, all_errs, all_labels, all_days = [], [], [], [], []
+    all_temps, all_offsets, all_errs, all_amps, all_labels, all_days = [], [], [], [], [], []
     for base_dir in base_dirs:
-        temps, offsets, errs, labels = collect(base_dir)
+        temps, offsets, errs, amps, labels = collect(base_dir)
         day = day_label(base_dir)
         all_temps.append(temps)
         all_offsets.append(offsets)
         all_errs.append(errs)
+        all_amps.append(amps)
         all_labels.extend(labels)
         all_days.extend([day] * len(temps))
 
     temps = np.concatenate(all_temps) if all_temps else np.array([])
     offsets = np.concatenate(all_offsets) if all_offsets else np.array([])
     offset_errs = np.concatenate(all_errs) if all_errs else np.array([])
-    return temps, offsets, offset_errs, all_labels, np.array(all_days)
+    amplitudes = np.concatenate(all_amps) if all_amps else np.array([])
+    return temps, offsets, offset_errs, amplitudes, all_labels, np.array(all_days)
 
 
 def linear_fit_ci(x, y, confidence=0.95, n_fit=200):
@@ -117,11 +121,11 @@ def main(base_dirs):
     if isinstance(base_dirs, (str, Path)):
         base_dirs = [base_dirs]
 
-    temps, offsets, offset_errs, labels, days = collect_multiple(base_dirs)
+    temps, offsets, offset_errs, amplitudes, labels, days = collect_multiple(base_dirs)
     if len(temps) == 0:
         raise SystemExit(f"No LWfit-values.txt files found under {base_dirs}")
 
-    fig, ax = plt.subplots(figsize=(7, 5))
+    fig, ax = plt.subplots(figsize=(5,4))
 
     ax.errorbar(
         temps, offsets, yerr=offset_errs,
@@ -157,7 +161,44 @@ def main(base_dirs):
     fig.savefig(Path(base_dirs[0]).joinpath("offset_vs_temperature.png"), dpi=300)
     print(f"Figure saved to {Path(base_dirs[0]).joinpath('offset_vs_temperature.png')}")
     print(f"slope={slope:.5g} G/K, intercept={intercept:.5g} G, R^2={r_squared:.4f}")
-    return fig, ax
+
+    abs_amplitudes = np.abs(amplitudes)
+
+    fig2, ax2 = plt.subplots(figsize=(5,4))
+    sc = ax2.scatter(
+        temps, abs_amplitudes, c=offsets, cmap="viridis", s=40,
+        edgecolors="k", linewidths=0.5, zorder=3,
+    )
+    cbar = fig2.colorbar(sc, ax=ax2)
+    cbar.set_label("Fitted Linewidth (G)")
+
+    amp_x_fit, amp_y_fit, amp_ci, amp_slope, amp_intercept, amp_r_squared = linear_fit_ci(
+        temps, abs_amplitudes,
+    )
+    ax2.plot(
+        amp_x_fit, amp_y_fit, "-", color="tab:orange", lw=1.5, zorder=2,
+        label=rf"linear fit ($R^2={amp_r_squared:.3f}$)",
+    )
+    ax2.fill_between(
+        amp_x_fit, amp_y_fit - amp_ci, amp_y_fit + amp_ci, color="tab:orange", alpha=0.25,
+        label=r"95\% CI (fit)",
+    )
+
+    ax2.set_xlabel("Temperature (K)")
+    ax2.set_ylabel("Fitted Amplitude (G)")
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(fontsize=9)
+    fig2.tight_layout()
+    print(
+        f"|amplitude| fit: slope={amp_slope:.5g} G/K, "
+        f"intercept={amp_intercept:.5g} G, R^2={amp_r_squared:.4f}"
+    )
+
+    amp_path = Path(base_dirs[0]).joinpath("offset_vs_amplitude.png")
+    fig2.savefig(amp_path, dpi=300)
+    print(f"Figure saved to {amp_path}")
+
+    return fig, ax, fig2, ax2
 
 
 if __name__ == "__main__":
