@@ -23,9 +23,14 @@ RUN_EMCEE = False       # set False to skip emcee and plot using saved LSQ param
 LONG_EMCEE = False      # set True to run a long emcee run (default is short test values)
 REPLOT_FROM_COMPARISON = False  # set True to skip all fitting and regenerate plots from emcee_comparison.txt
 PROFILE_TAU = False  # set True to run profile likelihood scan over alpha_frac and delta
-RUN_PROFILE_MATRIX = True   # set True to run profile likelihood matrix / corner plot
-REPLOT_PROFILE_MATRIX = False  # set True to regenerate plots/CI from saved profile_matrix_scans.txt (no re-scan)
+RUN_PROFILE_MATRIX = False   # set True to run profile likelihood matrix / corner plot
+REPLOT_PROFILE_MATRIX = True  # set True to regenerate plots/CI from saved profile_matrix_scans.txt (no re-scan)
 PROFILE_TOTAL_UNFOLDED = False  # set True to profile beta+alpha as a single quantity
+PROFILE_ALPHA_FRAC = False  # set True to run profile likelihood scan over alpha_frac alone
+USE_MEASURED_N_EFF_TIME = True  # set True to substitute the ACF-measured N_eff_time in
+# place of the fixed n_time_independent=3, purely as a CI-width sensitivity check.
+# Output files get a "_measuredTeff" tag appended so they never overwrite the
+# production (fixed-N_eff_time=3) results.
 REDUCE_COMPUTATION_SPEEDUP = False  # set True to use reduced r-grid/field/time resolution for basinhopping and LSQ as well
 RUN_BOOTSTRAP = False  # set True to run residual block bootstrap for realistic parameter uncertainties
 RUN_MULTISTART = False   # set True to run multistart /landscape diagnostic (random restarts, same data)
@@ -495,6 +500,110 @@ def _prefer_wings_n_eff(n_eff_total, n_eff_field, n_eff_total_wings, n_eff_field
     return n_eff_total, n_eff_field
 
 
+def _diagnose_time_n_eff(noise_2d, t, t_on, t_off=None, n_time_independent=3,
+                         field=None, far_field_G=10.0, label_prefix=""):
+    """Estimate N_eff_time from the actual noise autocorrelation in
+    signal-free time regions -- (1) the pre-t_on baseline alone, (2) if
+    t_off is given, that baseline combined with the post-(t_off+5s) tail
+    (matching estimate_sigma_noise's own quiet-region mask), and (3) an
+    early-half/late-half split of that tail, as a stationarity check (a real
+    kinetic-residual contamination would show up as very different
+    correlation structure between the two halves, since signal amplitude
+    changes most rapidly early in the recovery).
+
+    If field and far_field_G are given, only |field| > far_field_G rows are
+    used -- matching the wings-only philosophy already used for N_eff_field,
+    so both diagnostics are computed from the same signal-free subset of the
+    data. This matters even though the field-axis smoothing subtraction
+    happens independently at each time slice: an imperfect subtraction near
+    the peak leaves a residual whose *amplitude* tracks the real (and here,
+    genuinely time-varying) signal size, which could inject spurious time
+    correlation tracking the kinetics rather than the instrument noise.
+
+    The two/three segments are not contiguous (kinetics happen in between),
+    so each is correlated separately and the results length-weighted-
+    averaged -- otherwise correlate() would see a false discontinuity where
+    the kinetic region was excised.
+
+    Returns the combined (pre-t_on + post-t_off+5) N_eff_time estimate (or
+    the pre-t_on-only one if t_off is None, or the combined estimate can't
+    be computed), or None if nothing could be estimated at all.
+    """
+    t_arr = np.asarray(t)
+    noise_2d = np.asarray(noise_2d)
+    if field is not None and far_field_G is not None:
+        row_mask = np.abs(np.asarray(field)) > far_field_G
+        if row_mask.sum() >= 3:
+            noise_2d = noise_2d[row_mask, :]
+
+    def _n_eff_from_idx(idx, label):
+        n_pts = idx.size
+        if n_pts < 3:
+            print(f"  {label_prefix}N_eff_time check ({label}): only {n_pts} points -- too few to estimate")
+            return None
+        breaks = np.flatnonzero(np.diff(idx) > 1) + 1
+        rho_sums, weights = [], []
+        for seg in np.split(idx, breaks):
+            if len(seg) < 3:
+                continue
+            _, rho_seg, n_valid_seg = _acf_rho_sum(noise_2d[:, seg].T)
+            if n_valid_seg == 0:
+                continue
+            rho_sums.append(rho_seg)
+            weights.append(len(seg))
+        if not rho_sums:
+            print(f"  {label_prefix}N_eff_time check ({label}): zero variance -- skipped")
+            return None
+        rho_sum = float(np.average(rho_sums, weights=weights))
+        n_eff = n_pts / rho_sum
+        print(
+            f"  {label_prefix}N_eff_time check ({label}, {n_pts} pts): ACF-based estimate={n_eff:.2f}"
+            f"  vs. fixed n_time_independent={n_time_independent:g}"
+        )
+        return n_eff
+
+    _n_eff_from_idx(
+        np.arange(t_arr.size),
+        f"full unmasked, all t (0-{t_arr[-1]:g}s, no t_on/t_off exclusion)",
+    )
+
+    baseline_n_eff = _n_eff_from_idx(np.flatnonzero(t_arr < t_on), f"pre-t_on={t_on:g}s")
+    combined_n_eff = None
+    if t_off is not None:
+        combined_idx = np.flatnonzero((t_arr < t_on) | (t_arr > (t_off + 5)))
+        combined_n_eff = _n_eff_from_idx(combined_idx, f"pre-t_on + post-(t_off+5s)={t_off + 5:g}s")
+
+        tail_idx = np.flatnonzero(t_arr > (t_off + 5))
+        if tail_idx.size >= 6:
+            half = tail_idx.size // 2
+            early_idx, late_idx = tail_idx[:half], tail_idx[half:]
+            _n_eff_from_idx(
+                early_idx,
+                f"post-tail early half ({t_arr[early_idx[0]]:g}-{t_arr[early_idx[-1]]:g}s)",
+            )
+            _n_eff_from_idx(
+                late_idx,
+                f"post-tail late half ({t_arr[late_idx[0]]:g}-{t_arr[late_idx[-1]]:g}s)",
+            )
+
+    return combined_n_eff if combined_n_eff is not None else baseline_n_eff
+
+
+def _maybe_use_measured_n_eff_time(n_eff_total, n_eff_field, measured_n_eff_time):
+    """If USE_MEASURED_N_EFF_TIME is set, override the fixed n_time_independent=3
+    with the ACF-measured N_eff_time for this run (sensitivity check only --
+    see the NOTE at each call site for why this isn't used in production).
+    Returns (n_eff_total, filename_tag)."""
+    if USE_MEASURED_N_EFF_TIME and measured_n_eff_time is not None:
+        n_eff_total_measured = n_eff_field * measured_n_eff_time
+        print(
+            f"USE_MEASURED_N_EFF_TIME: overriding N_eff_time=3 -> measured={measured_n_eff_time:.1f} "
+            f"(N_eff_total {n_eff_total:.1f} -> {n_eff_total_measured:.1f})"
+        )
+        return n_eff_total_measured, "_measuredTeff"
+    return n_eff_total, ""
+
+
 def fit_function(
     params,
     broadened_data,
@@ -744,6 +853,21 @@ def do_profile_likelihood(param_name, param_values, broadened_file, intrinsic_fi
         save_path=fits_path / "noise_acf.png", far_field_G=10.0,
     )
     n_eff_total, n_eff_col = _prefer_wings_n_eff(n_eff_total, n_eff_col, _n_eff_total_w, _n_eff_col_w)
+    _t_on, _t_off = lsq_vals.get("t_on", 30), lsq_vals.get("t_off", 40)
+    measured_n_eff_time = _diagnose_time_n_eff(
+        _noise_2d[:, ::skip_times], t, _t_on, _t_off, field=field_interp,
+    )
+    _out_lsq = simulate_matrix(_lsq_params, pake_arr, intrinsic_centered[:, 0], t, r)
+    _fit_resid_2d = broadened_centered[:, ::skip_times] - _out_lsq
+    _diagnose_time_n_eff(
+        _fit_resid_2d, t, _t_on, _t_off, field=field_interp, label_prefix="[fit-residual] ",
+    )
+    # NOTE: measured_n_eff_time is diagnostic only -- do NOT use it for n_eff_total.
+    # Tried it: it pushes the Wilks threshold below the profile scan's own solver
+    # noise floor (xtol/ftol=1e-5 per re-optimization), breaking the CI machinery
+    # outright (LSQ falling outside its own CI, <scan_min/>scan_max everywhere
+    # degenerate parameters compensate). n_time_independent=3 (fixed) stands.
+    n_eff_total, _teff_tag = _maybe_use_measured_n_eff_time(n_eff_total, n_eff_col, measured_n_eff_time)
     print(f"N_eff = {n_eff_total:.1f}  (N_eff_field={n_eff_col:.1f} × N_eff_time=3 fixed)")
     # best-fit chi-square: re-evaluate at LSQ params
     _lsq_resid = fit_function(
@@ -822,9 +946,47 @@ def do_profile_likelihood(param_name, param_values, broadened_file, intrinsic_fi
             rows.append({"param_value": val, "chisqr": float("nan"), "redchi": float("nan")})
 
     df = pd.DataFrame(rows)
-    out_txt = fits_path / f"profile_likelihood_{param_name}.txt"
-    out_png = fits_path / f"profile_likelihood_{param_name}.png"
-    df.to_string(out_txt, index=False)
+    out_txt = fits_path / f"profile_likelihood_{param_name}{_teff_tag}.txt"
+    out_png = fits_path / f"profile_likelihood_{param_name}{_teff_tag}.png"
+
+    lsq_ref = lsq_vals.get(param_name, None)
+    chi2_threshold_line = chi2_min_lsq + delta_chi2_threshold
+
+    # CI via threshold crossing -- walk outward from the minimum and stop at
+    # the first crossing on each side (see do_profile_total_unfolded for why:
+    # scanning the whole array and letting later crossings overwrite earlier
+    # ones lets a single spurious spike silently replace the correct bound).
+    _x = df["param_value"].values
+    _c = df["chisqr"].values
+    _valid = np.isfinite(_c)
+    _x, _c = _x[_valid], _c[_valid]
+    ci_lo = ci_hi = None
+    if _c.size:
+        i_min = int(np.argmin(_c))
+        for i in range(i_min, 0, -1):
+            if (_c[i] - chi2_threshold_line) * (_c[i - 1] - chi2_threshold_line) < 0:
+                frac = (chi2_threshold_line - _c[i]) / (_c[i - 1] - _c[i])
+                ci_lo = _x[i] + frac * (_x[i - 1] - _x[i])
+                break
+        for i in range(i_min, len(_c) - 1):
+            if (_c[i] - chi2_threshold_line) * (_c[i + 1] - chi2_threshold_line) < 0:
+                frac = (chi2_threshold_line - _c[i]) / (_c[i + 1] - _c[i])
+                ci_hi = _x[i] + frac * (_x[i + 1] - _x[i])
+                break
+    lo_str = f"{ci_lo:.4f}" if ci_lo is not None else "<scan_min"
+    hi_str = f"{ci_hi:.4f}" if ci_hi is not None else ">scan_max"
+    lsq_str = f"{lsq_ref:.4f}" if lsq_ref is not None else "n/a"
+    print(f"\n{param_name}  LSQ={lsq_str}  CI=[{lo_str}, {hi_str}]  (95%, N_eff={n_eff_total:.0f})")
+
+    with open(out_txt, "w") as fh:
+        fh.write(df.to_string(index=False))
+        fh.write(f"\n\n# Summary\n")
+        fh.write(f"# LSQ        = {lsq_str}\n")
+        fh.write(f"# CI_low     = {lo_str}\n")
+        fh.write(f"# CI_high    = {hi_str}\n")
+        fh.write(f"# N_eff      = {n_eff_total:.1f}\n")
+        fh.write(f"# chi2_min   = {chi2_min_lsq:.6g}\n")
+        fh.write(f"# delta_chi2 = {delta_chi2_threshold:.6g}\n")
     print(f"Saved profile to {out_txt}")
 
     fitted_param_cols = [c for c in ("w0", "w1", "r0", "r1", "delta", "beta", "A") if c in df.columns]
@@ -834,14 +996,16 @@ def do_profile_likelihood(param_name, param_values, broadened_file, intrinsic_fi
         axes = [axes]
 
     axes[0].plot(df["param_value"], df["chisqr"], "o-")
-    lsq_ref = lsq_vals.get(param_name, None)
-    chi2_threshold_line = chi2_min_lsq + delta_chi2_threshold
     axes[0].axhline(chi2_threshold_line, ls=":", c="red", lw=1.2,
                     label=f"95\\% CI threshold ($\\Delta\\chi^2$={delta_chi2_threshold:.2g}, N_eff={n_eff_total:.0f})")
     if lsq_ref is not None:
         for ax in axes:
             ax.axvline(lsq_ref, ls="--", c="gray", alpha=0.5)
         axes[0].axvline(lsq_ref, ls="--", c="gray", label=f"LSQ={lsq_ref:.3g}")
+    if ci_lo is not None:
+        axes[0].axvline(ci_lo, ls="-", c="red", lw=0.9, alpha=0.7, label=f"CI [{lo_str}, {hi_str}]")
+    if ci_hi is not None:
+        axes[0].axvline(ci_hi, ls="-", c="red", lw=0.9, alpha=0.7)
     axes[0].legend(fontsize=7)
     axes[0].set_ylabel("chi-square")
     axes[0].set_title(f"Profile likelihood: {param_name}")
@@ -1021,6 +1185,22 @@ def do_profile_likelihood_matrix(
         save_path=fits_path / "noise_acf.png", far_field_G=10.0,
     )
     n_eff_total, n_eff_field = _prefer_wings_n_eff(n_eff_total, n_eff_field, _n_eff_total_w, _n_eff_field_w)
+    _t_on, _t_off = lsq_vals.get("t_on", 30), lsq_vals.get("t_off", 40)
+    measured_n_eff_time = _diagnose_time_n_eff(
+        _noise_2d[:, ::skip_times], t, _t_on, _t_off, field=field_interp,
+    )
+    _out_lsq = simulate_matrix(ref_params, pake_arr, intrinsic_centered[:, 0], t, r)
+    _fit_resid_2d = broadened_centered[:, ::skip_times] - _out_lsq
+    _diagnose_time_n_eff(
+        _fit_resid_2d, t, _t_on, _t_off, field=field_interp, label_prefix="[fit-residual] ",
+    )
+    # NOTE: measured_n_eff_time is diagnostic only -- do NOT use it for n_eff_total.
+    # Tried it: it pushes the Wilks threshold below the profile scan's own solver
+    # noise floor (xtol/ftol=1e-5 per re-optimization), breaking the CI machinery
+    # outright (LSQ falling outside its own CI, <scan_min/>scan_max everywhere
+    # degenerate parameters compensate). n_time_independent=3 (fixed) stands.
+    n_eff_total, _teff_tag = _maybe_use_measured_n_eff_time(n_eff_total, n_eff_field, measured_n_eff_time)
+    print(f"N_eff = {n_eff_total:.1f}  (N_eff_field={n_eff_field:.1f} × N_eff_time=3 fixed)")
     _lsq_resid = fit_function(
         ref_params, broadened_centered[:, ::skip_times], pake_arr,
         intrinsic_centered[:, 0], t, r, field_interp, sigma_noise=sigma_noise,
@@ -1365,7 +1545,7 @@ def do_profile_likelihood_matrix(
             "ci_low":  lo   * _s if lo   is not None else float("nan"),
             "ci_high": hi   * _s if hi   is not None else float("nan"),
         })
-    pd.DataFrame(ci_rows).to_string(fits_path / "profile_ci_bounds.txt", index=False)
+    pd.DataFrame(ci_rows).to_string(fits_path / f"profile_ci_bounds{_teff_tag}.txt", index=False)
 
     # --- corner plot ---
     # replace n_resp with alpha (= n_resp/(n_resp+1) * (1-beta)) for interpretability
@@ -1494,7 +1674,7 @@ def do_profile_likelihood_matrix(
 
     fig.suptitle("Profile likelihood matrix", fontsize=10)
     fig.tight_layout()
-    out_png = fits_path / "profile_likelihood_matrix.png"
+    out_png = fits_path / f"profile_likelihood_matrix{_teff_tag}.png"
     fig.savefig(out_png, dpi=600)
     plt.close(fig)
     print(f"Saved matrix plot to {out_png}")
@@ -1557,7 +1737,7 @@ def do_profile_likelihood_matrix(
         axes_pub_flat[_pi].set_visible(False)
 
     fig_pub.tight_layout()
-    out_png_pub = fits_path / "profile_likelihood_profiles.png"
+    out_png_pub = fits_path / f"profile_likelihood_profiles{_teff_tag}.png"
     fig_pub.savefig(out_png_pub, dpi=600)
     plt.close(fig_pub)
     print(f"Saved profile grid to {out_png_pub}")
@@ -1626,6 +1806,22 @@ def do_profile_total_unfolded(
     for pname, pval in lsq_vals.items():
         if pname in ref_params and ref_params[pname].vary and ref_params[pname].expr is None:
             ref_params[pname].set(value=pval)
+    _t_on, _t_off = lsq_vals.get("t_on", 30), lsq_vals.get("t_off", 40)
+    measured_n_eff_time = _diagnose_time_n_eff(
+        _noise_2d[:, ::skip_times], t, _t_on, _t_off, field=field_interp,
+    )
+    _out_lsq = simulate_matrix(ref_params, pake_arr, intrinsic_centered[:, 0], t, r)
+    _fit_resid_2d = broadened_centered[:, ::skip_times] - _out_lsq
+    _diagnose_time_n_eff(
+        _fit_resid_2d, t, _t_on, _t_off, field=field_interp, label_prefix="[fit-residual] ",
+    )
+    # NOTE: measured_n_eff_time is diagnostic only -- do NOT use it for n_eff_total.
+    # Tried it: it pushes the Wilks threshold below the profile scan's own solver
+    # noise floor (xtol/ftol=1e-5 per re-optimization), breaking the CI machinery
+    # outright (LSQ falling outside its own CI, <scan_min/>scan_max everywhere
+    # degenerate parameters compensate). n_time_independent=3 (fixed) stands.
+    n_eff_total, _teff_tag = _maybe_use_measured_n_eff_time(n_eff_total, n_eff_field, measured_n_eff_time)
+    print(f"N_eff = {n_eff_total:.1f}  (N_eff_field={n_eff_field:.1f} × N_eff_time=3 fixed)")
     _lsq_resid = fit_function(
         ref_params, broadened_centered[:, ::skip_times], pake_arr,
         intrinsic_centered[:, 0], t, r, field_interp, sigma_noise=sigma_noise,
@@ -1712,25 +1908,32 @@ def do_profile_total_unfolded(
     rows.append({"scan_val": _total_lsq, "chisqr": chi2_min_lsq, "beta": _beta_lsq, "alpha": _lsq_al})
     df = pd.DataFrame(sorted(rows, key=lambda r_: r_["scan_val"]))
 
-    # CI via threshold crossing
+    # CI via threshold crossing -- walk outward from the minimum and stop at
+    # the *first* crossing on each side. Scanning the whole array and letting
+    # later crossings overwrite earlier ones would let a single spurious
+    # spike (e.g. a profile-scan step whose local refit got stuck) anywhere
+    # past the true edge silently replace the correct bound with a wrong one.
     x = df["scan_val"].values
     c = df["chisqr"].values
     valid = np.isfinite(c)
     x, c = x[valid], c[valid]
+    i_min = int(np.argmin(c))
     ci_lo = ci_hi = None
-    for i in range(len(c) - 1):
+    for i in range(i_min, 0, -1):
+        if (c[i] - threshold_val) * (c[i - 1] - threshold_val) < 0:
+            frac = (threshold_val - c[i]) / (c[i - 1] - c[i])
+            ci_lo = x[i] + frac * (x[i - 1] - x[i])
+            break
+    for i in range(i_min, len(c) - 1):
         if (c[i] - threshold_val) * (c[i + 1] - threshold_val) < 0:
             frac = (threshold_val - c[i]) / (c[i + 1] - c[i])
-            x_cross = x[i] + frac * (x[i + 1] - x[i])
-            if c[i] > threshold_val:
-                ci_lo = x_cross
-            else:
-                ci_hi = x_cross
+            ci_hi = x[i] + frac * (x[i + 1] - x[i])
+            break
     lo_str = f"{ci_lo:.4f}" if ci_lo is not None else "<scan_min"
     hi_str = f"{ci_hi:.4f}" if ci_hi is not None else ">scan_max"
     print(f"\ntotal_unfolded  LSQ={_total_lsq:.4f}  CI=[{lo_str}, {hi_str}]  (95%, N_eff={n_eff_total:.0f})")
 
-    out_txt = fits_path / "profile_total_unfolded.txt"
+    out_txt = fits_path / f"profile_total_unfolded{_teff_tag}.txt"
     with open(out_txt, "w") as fh:
         fh.write(df.to_string(index=False))
         fh.write(f"\n\n# Summary\n")
@@ -1754,7 +1957,7 @@ def do_profile_total_unfolded(
     ax.set_ylabel(r"$\chi^2$")
     ax.legend(fontsize=8)
     fig.tight_layout()
-    out_png = fits_path / "profile_total_unfolded.png"
+    out_png = fits_path / f"profile_total_unfolded{_teff_tag}.png"
     fig.savefig(out_png, dpi=600)
     plt.close(fig)
     print(f"Saved to {out_txt} and {out_png}")
@@ -3162,7 +3365,7 @@ if __name__ == "__main__":
     _lsq_sub = "LSQ" if _production else "LSQ_fast"
     _map_sub = "MAP" if _production else "MAP_fast"
 
-    _skip_fitting = SKIP_TO_EMCEE or PROFILE_TAU or REPLOT_FROM_COMPARISON or RUN_BOOTSTRAP or RUN_MULTISTART or RUN_PROFILE_MATRIX or PROFILE_TOTAL_UNFOLDED or REPLOT_PROFILE_MATRIX
+    _skip_fitting = SKIP_TO_EMCEE or PROFILE_TAU or REPLOT_FROM_COMPARISON or RUN_BOOTSTRAP or RUN_MULTISTART or RUN_PROFILE_MATRIX or PROFILE_TOTAL_UNFOLDED or REPLOT_PROFILE_MATRIX or PROFILE_ALPHA_FRAC
     if not _skip_fitting:
         if REFINE_FROM_SEED:
             # Skip basinhopping; copy the saved LSQ repr to the checkpoint so the local
@@ -3187,16 +3390,30 @@ if __name__ == "__main__":
     comparison_file = Path(broadened_f).parent / "fits" / "emcee_comparison.txt"
     map_repr_path = Path(broadened_f).parent / "fits" / ".fit_params_map.repr"
 
+    # alpha_frac is not one of the free (non-expr) params scanned by the
+    # profile_matrix corner plot (it's derived from n_resp), so it always gets
+    # its own standalone scan/plot via do_profile_likelihood -- never folded
+    # into the matrix grid itself.
+    # alpha_frac = n_resp/(n_resp+1); n_resp's own bound (max=200, see
+    # create_fit_params) caps alpha_frac at ~0.9950 -- alpha_frac=1.0 exactly
+    # is an unreachable n_resp->inf limit and divides by zero when converted
+    # back to n_resp below, so the grid must stop strictly short of it.
+    _alpha_frac_grid = np.linspace(0.1, 0.995, 25)
+
     if RUN_PROFILE_MATRIX:
-        do_profile_likelihood_matrix(broadened_f, intrinsic_f, pake_patterns, n_points=20, **_fast)
+        do_profile_likelihood_matrix(broadened_f, intrinsic_f, pake_patterns, n_points=20, **_speedup)
+        do_profile_total_unfolded(broadened_f, intrinsic_f, pake_patterns, n_points=20, **_speedup)
+        do_profile_likelihood("alpha_frac", _alpha_frac_grid, broadened_f, intrinsic_f, pake_patterns, **_speedup)
     if REPLOT_PROFILE_MATRIX:
-        do_profile_likelihood_matrix(broadened_f, intrinsic_f, pake_patterns, replot=True, **_fast)
+        do_profile_likelihood_matrix(broadened_f, intrinsic_f, pake_patterns, replot=True, **_speedup)
     if PROFILE_TOTAL_UNFOLDED:
-        do_profile_total_unfolded(broadened_f, intrinsic_f, pake_patterns, n_points=20, **_fast)
+        do_profile_total_unfolded(broadened_f, intrinsic_f, pake_patterns, n_points=20, **_speedup)
+    elif PROFILE_ALPHA_FRAC:
+        do_profile_likelihood("alpha_frac", _alpha_frac_grid, broadened_f, intrinsic_f, pake_patterns, **_speedup)
     elif RUN_MULTISTART:
-        do_multistart(broadened_f, intrinsic_f, pake_patterns, n_starts=50, **_fast)
+        do_multistart(broadened_f, intrinsic_f, pake_patterns, n_starts=50, **_speedup)
     elif RUN_BOOTSTRAP:
-        do_residual_bootstrap(broadened_f, intrinsic_f, pake_patterns, n_bootstrap=100, **_fast)
+        do_residual_bootstrap(broadened_f, intrinsic_f, pake_patterns, n_bootstrap=100, **_speedup)
     elif PROFILE_TAU:
         # Two-stage tau_prior scan: coarse pass to locate L-curve knee, then fine pass around it.
         _TAU_MAX = 2.5  # above this r_0 rails at 2 nm

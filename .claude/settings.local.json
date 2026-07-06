@@ -69,7 +69,8 @@
       "Bash(awk -F: '$1<460')",
       "Bash(mkdir -p /tmp/dipolar_test2)",
       "Read(//tmp/**)",
-      "Bash(rm -rf /tmp/dipolar_test2)"
+      "Bash(rm -rf /tmp/dipolar_test2)",
+      "Bash(python3 -m py_compile pakeGlobalFit_v3.py)"
     ],
     "additionalDirectories": [
       "/private/tmp/dipolar_test",
