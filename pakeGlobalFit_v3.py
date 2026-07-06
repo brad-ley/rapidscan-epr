@@ -22,12 +22,12 @@ SKIP_TO_EMCEE = False  # set True to skip basinhopping+lsq and go straight to em
 RUN_EMCEE = False       # set False to skip emcee and plot using saved LSQ params
 LONG_EMCEE = False      # set True to run a long emcee run (default is short test values)
 REPLOT_FROM_COMPARISON = False  # set True to skip all fitting and regenerate plots from emcee_comparison.txt
-PROFILE_TAU = False  # set True to run profile likelihood scan over alpha_frac and delta
+PROFILE_TAU = True  # set True to run profile likelihood scan over alpha_frac and delta
 RUN_PROFILE_MATRIX = False   # set True to run profile likelihood matrix / corner plot
-REPLOT_PROFILE_MATRIX = True  # set True to regenerate plots/CI from saved profile_matrix_scans.txt (no re-scan)
+REPLOT_PROFILE_MATRIX = False  # set True to regenerate plots/CI from saved profile_matrix_scans.txt (no re-scan)
 PROFILE_TOTAL_UNFOLDED = False  # set True to profile beta+alpha as a single quantity
 PROFILE_ALPHA_FRAC = False  # set True to run profile likelihood scan over alpha_frac alone
-USE_MEASURED_N_EFF_TIME = True  # set True to substitute the ACF-measured N_eff_time in
+USE_MEASURED_N_EFF_TIME = False  # set True to substitute the ACF-measured N_eff_time in
 # place of the fixed n_time_independent=3, purely as a CI-width sensitivity check.
 # Output files get a "_measuredTeff" tag appended so they never overwrite the
 # production (fixed-N_eff_time=3) results.
@@ -1010,9 +1010,10 @@ def do_profile_likelihood(param_name, param_values, broadened_file, intrinsic_fi
     axes[0].set_ylabel("chi-square")
     axes[0].set_title(f"Profile likelihood: {param_name}")
 
+    _param_labels = {"w0": r"$\sigma_D$", "w1": r"$\sigma_L$"}
     for ax, col in zip(axes[1:], fitted_param_cols):
         ax.plot(df["param_value"], df[col], "o-")
-        ax.set_ylabel(col)
+        ax.set_ylabel(_param_labels.get(col, col))
 
     axes[-1].set_xlabel(param_name)
     fig.tight_layout()
@@ -1057,7 +1058,7 @@ def do_profile_likelihood(param_name, param_values, broadened_file, intrinsic_fi
             print(f"\nL-curve corner ({label}): tau_prior = {taus[idx]:.3g}  "
                   f"(chi={chi[idx]:.4g}, dev={devs[idx]:.4g})")
 
-        fig_lc, axes_lc = plt.subplots(1, 3, figsize=(14, 4))
+        fig_lc, axes_lc = plt.subplots(1, 2, figsize=(10, 4))
 
         # Panel 1: all-prior L-curve
         ax_l = axes_lc[0]
@@ -1079,26 +1080,8 @@ def do_profile_likelihood(param_name, param_values, broadened_file, intrinsic_fi
         ax_l.set_title("L-curve (all priors)")
         ax_l.legend(fontsize=7)
 
-        # Panel 2: width-only L-curve
-        ax_w = axes_lc[1]
-        pdev_w = curves["w0+w1 only"]
-        sc2 = ax_w.scatter(pdev_w, chi, c=taus, cmap="viridis", zorder=3)
-        ax_w.plot(pdev_w, chi, "-", color="gray", lw=0.8, zorder=2)
-        idx_w, tau_w, _, _ = corners["w0+w1 only"]
-        ax_w.scatter(pdev_w[idx_w], chi[idx_w], s=120, color=colors["w0+w1 only"],
-                     zorder=4, label=f"corner $\\tau$={tau_w:.3g}")
-        if lsq_ref is not None and mask.any():
-            ax_w.scatter(pdev_w[mask], chi[mask], s=80, marker="D", color="orange",
-                         zorder=4, label=f"current $\\tau$={lsq_ref:.3g}")
-        plt.colorbar(sc2, ax=ax_w, label=r"tau\_prior")
-        ax_w.set_xscale("log"); ax_w.set_yscale("log")
-        ax_w.set_xlabel("width dev (w0+w1 only)")
-        ax_w.set_ylabel("chi-square")
-        ax_w.set_title("L-curve (w0+w1)")
-        ax_w.legend(fontsize=7)
-
-        # Panel 3: curvature vs tau_prior for both
-        ax_k = axes_lc[2]
+        # Panel 2: curvature vs tau_prior for both
+        ax_k = axes_lc[1]
         for label, (idx, tau_c, devs, curv) in corners.items():
             ax_k.plot(taus[1:-1], curv[1:-1], "o-", color=colors[label], label=label)
             ax_k.axvline(tau_c, ls="--", color=colors[label], lw=1)
