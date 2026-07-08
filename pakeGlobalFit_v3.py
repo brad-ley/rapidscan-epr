@@ -17,7 +17,7 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
 
-N414Q = False
+N414Q = True
 SKIP_TO_EMCEE = False  # set True to skip basinhopping+lsq and go straight to emcee
 RUN_EMCEE = False       # set False to skip emcee and plot using saved LSQ params
 LONG_EMCEE = False      # set True to run a long emcee run (default is short test values)
@@ -27,6 +27,11 @@ REPLOT_TAU_PRIOR = False  # set True to regenerate the tau_prior CI/L-curve plot
 # saved profile_likelihood_tau_prior.txt instead of re-running the (expensive) scan
 RUN_PROFILE_MATRIX = True   # set True to run profile likelihood matrix / corner plot
 REPLOT_PROFILE_MATRIX = False  # set True to regenerate plots/CI from saved profile_matrix_scans.txt (no re-scan)
+RESCAN_ONLY = None  # TEMPORARY DEBUGGING AID: set to a list like ["n_resp"] to
+# freshly re-scan just those entries (loading everything else from the saved
+# profile_matrix_scans.txt) instead of a full re-scan -- for fast iteration
+# on one suspect scan. Only takes effect when RUN_PROFILE_MATRIX=True. Leave
+# as None for normal use.
 PROFILE_TOTAL_UNFOLDED = False  # set True to profile beta+alpha as a single quantity
 USE_MEASURED_N_EFF_TIME = False  # set True to substitute the ACF-measured N_eff_time in
 # place of the fixed n_time_independent=3, purely as a CI-width sensitivity check.
@@ -755,7 +760,7 @@ def simulate_matrix(params, pake_data, intrinsic_lineshape, t, r):
 
 def create_fit_params(t):
     return lmfit.create_params(
-        A=dict(value=1.5, vary=True, min=0.5, max=2),
+        A=dict(value=1.0, vary=True, min=0.75, max=1.25),
         tau_1=dict(  # noqa: C408
             value=np.max(t) / 200,
             vary=True,
@@ -1110,10 +1115,20 @@ def do_profile_likelihood_matrix(
     n_points=15,
     decimate_r=1, n_field=1024, skip_times=1,
     replot=False,
+    rescan_only=None,
 ):
     """Profile likelihood corner plot: 1D chi-square profile on the diagonal,
     how each other parameter co-varies on the off-diagonal cells.
     Loads data once and scans all free parameters in a single pass.
+
+    rescan_only: TEMPORARY DEBUGGING AID. A list of scan names (any of the
+    real free parameters, or "Sigma"/"alpha"/"r1") to freshly re-scan while
+    loading everything else from the saved profile_matrix_scans.txt --
+    implies loading from that file first, same as replot=True. Lets you
+    iterate on one suspect scan (e.g. rescan_only=["n_resp"], since
+    alpha_frac is read off the n_resp scan) without paying for the full
+    multi-minute matrix re-scan every time. Remove once the n_resp/alpha_frac
+    investigation is done.
     """
     import ast
 
@@ -1194,25 +1209,78 @@ def do_profile_likelihood_matrix(
     )
     chi2_min_lsq = float(np.sum(_lsq_resid ** 2))
     delta_chi2_threshold = 3.84 * chi2_min_lsq / n_eff_total
+    # Computed early (rather than only after scanning, as before) so the
+    # adaptive scan below can use it as its stopping condition. If a scan
+    # later finds a lower chi-square than the stored LSQ, chi2_min_lsq and
+    # this threshold are recomputed post-hoc for the CI-bounds step -- see
+    # the "found lower chi-square than stored LSQ" block further down --
+    # but the scan itself always walks against this initial threshold.
+    threshold_val = chi2_min_lsq + delta_chi2_threshold
     print(f"N_eff = {n_eff_total:.1f}  (N_eff_field={n_eff_field:.1f} × N_eff_time=3 fixed)"
           f"  chi2_min={chi2_min_lsq:.6g}  Δchi2_threshold={delta_chi2_threshold:.6g}")
 
     free_params = [p for p in ref_params.values() if p.vary and p.expr is None]
     param_names = [p.name for p in free_params]
 
-    def _scan_range(p):
-        lo = p.min if np.isfinite(p.min) else p.value * 0.01
-        hi = p.max if np.isfinite(p.max) else p.value * 100
-        if lo > 0 and hi / lo > 20:
-            # log-spaced: multiplicative padding so we stay close to bounds
-            return np.logspace(np.log10(lo * 1.02), np.log10(hi * 0.98), n_points)
-        pad = (hi - lo) * 0.02
-        return np.linspace(lo + pad, hi - pad, n_points)
+    def _adaptive_scan_direction(ref_val, bound, evaluate, growth=1.25, min_step_frac=None, max_steps=40, min_points=4):
+        """Walk from ref_val toward bound with a geometrically increasing
+        step size, calling evaluate(x) -> row dict (must include a 'chisqr'
+        key, float or nan) at each candidate point. Stops as soon as chisqr
+        crosses threshold_val -- the last two points evaluated naturally
+        bracket the crossing, which is all the interpolation in
+        _find_ci_bounds needs, so no separate confirmation step is required
+        -- or once x reaches the hard bound.
+
+        This replaces a fixed dense grid spanning the parameter's entire
+        physical range, which wastes most of its evaluations deep in
+        already-excluded territory (e.g. the A panel used to spend most of
+        its points on A > 1.1 even though the LSQ optimum and its CI both
+        sit within [1.05, 1.06]) while simultaneously under-resolving
+        wherever the actual threshold crossing happens to fall. Starting
+        with a small step and growing geometrically concentrates points near
+        the LSQ (where the interesting curvature is) and still reaches the
+        far bound in O(log) steps if the curve never crosses.
+
+        If this first pass finds fewer than min_points (a steep chi^2 curve
+        can cross the threshold after just one or two steps), it's re-run as
+        an evenly spaced grid of min_points values between ref_val and
+        wherever the first pass stopped (its last x -- the same threshold
+        crossing or hard bound as before), trading a few extra evaluations
+        for a smoother-looking, still-correctly-bounded curve.
+        """
+        if not np.isfinite(bound) or bound == ref_val:
+            return []
+        frac = min_step_frac if min_step_frac is not None else 1.0 / max(n_points, 4)
+        direction = 1.0 if bound > ref_val else -1.0
+        step = abs(bound - ref_val) * frac
+        if step <= 0:
+            return []
+        x = ref_val
+        rows = []
+        for _ in range(max_steps):
+            x_next = x + direction * step
+            hit_bound = (x_next - bound) * direction >= 0
+            if hit_bound:
+                x_next = bound
+            row = evaluate(x_next)
+            rows.append(row)
+            c = row.get("chisqr", float("nan"))
+            if hit_bound:
+                break
+            if np.isfinite(c) and c > threshold_val:
+                break
+            step *= growth
+            x = x_next
+        if len(rows) < min_points:
+            final_x = rows[-1]["scan_val"]
+            dense_vals = np.linspace(ref_val, final_x, min_points + 1)[1:]  # skip ref_val itself
+            rows = [evaluate(float(v)) for v in dense_vals]
+        return rows
 
     fit_args = (broadened_centered[:, ::skip_times], pake_arr, intrinsic_centered[:, 0], t, r, field_interp)
 
     # --- run one 1D scan per free parameter (or reload from saved txt) ---
-    if replot:
+    if replot or rescan_only:
         out_txt = fits_path / "profile_matrix_scans.txt"
         if not out_txt.is_file():
             print(f"No saved scan data at {out_txt} — run RUN_PROFILE_MATRIX first.")
@@ -1236,25 +1304,34 @@ def do_profile_likelihood_matrix(
                 all_scans[_cur_pname] = pd.read_csv(
                     io.StringIO("".join(_cur_rows)), sep=r"\s+", engine="python"
                 )
-        # "Sigma" and "alpha" are derived/reparametrized scans (see below), not
-        # among the model's own free lmfit parameters -- exclude them here so
-        # downstream code that treats param_names as "the real free parameters"
-        # (e.g. ref_params[scan_pname] lookups) doesn't choke on them.
-        param_names = [k for k in all_scans.keys() if k not in ("Sigma", "alpha")]
+        # "Sigma", "alpha", and "r1" are derived/reparametrized scans (see
+        # below), not among the model's own free lmfit parameters -- exclude
+        # them here so downstream code that treats param_names as "the real
+        # free parameters" (e.g. ref_params[scan_pname] lookups) doesn't
+        # choke on them.
+        param_names = [k for k in all_scans.keys() if k not in ("Sigma", "alpha", "r1", "alpha_frac")]
         print(f"Loaded saved scans for: {param_names}")
     else:
         all_scans = {}
-    for scan_pname in ([] if replot else param_names):
-        scan_vals = _scan_range(ref_params[scan_pname])
-        ref_val = ref_params[scan_pname].value
-        # Bi-directional: scan outward from LSQ value so warm-start is always
-        # one small step from a good solution, not degraded by high-chi2 boundary.
-        below = sorted([v for v in scan_vals if v <= ref_val], reverse=True)
-        above = sorted([v for v in scan_vals if v > ref_val])
-        print(f"\nProfiling {scan_pname} over {len(scan_vals)} points (bi-directional from {ref_val:.4g}) ...")
 
-        def _run_direction(vals, start_seed):
-            def _fit_from(seed):
+    def _should_scan(_name):
+        # TEMPORARY (goes with rescan_only above): a scan runs fresh if
+        # either (a) rescan_only explicitly lists it, or (b) neither replot
+        # nor rescan_only is set (the normal full-fresh-scan path).
+        if rescan_only is not None:
+            return _name in rescan_only
+        return not replot
+    for scan_pname in [p for p in param_names if _should_scan(p)]:
+        p_obj = ref_params[scan_pname]
+        ref_val = p_obj.value
+        lo_bound = p_obj.min if np.isfinite(p_obj.min) else ref_val * 0.01
+        hi_bound = p_obj.max if np.isfinite(p_obj.max) else ref_val * 100
+        print(f"\nProfiling {scan_pname} adaptively from {ref_val:.4g}, bounded by [{lo_bound:.4g}, {hi_bound:.4g}] ...")
+
+        def _make_evaluator():
+            state = {"prev": None, "prev_chisqr": chi2_min_lsq}
+
+            def _fit_from(seed, val):
                 params_i = create_fit_params(t)
                 for pn, pv in seed.items():
                     if pn in params_i and params_i[pn].vary and params_i[pn].expr is None:
@@ -1266,22 +1343,22 @@ def do_profile_likelihood_matrix(
                     x_scale="jac", max_nfev=2000, xtol=1e-5, ftol=1e-5,
                 )
 
-            rows_d, prev_d, prev_chisqr = [], None, chi2_min_lsq
-            for val in vals:
-                seed_d = prev_d if prev_d is not None else start_seed
+            def _evaluate(val):
+                seed_d = state["prev"] if state["prev"] is not None else lsq_vals
                 try:
-                    res = _fit_from(seed_d)
+                    res = _fit_from(seed_d, val)
                     # Guard against a poisoned warm-start basin: if this step's
                     # chi-square spiked far above both the LSQ minimum and the
                     # previous accepted point, the local optimizer likely got
                     # stuck rather than the profile genuinely jumping -- retry
                     # from the original LSQ params. Without this, a single bad
-                    # step poisons prev_d and every subsequent warm-started
-                    # point in this direction inherits the bad basin, showing
-                    # up as a sustained "spike" near the minimum that
-                    # _find_ci_bounds can mistake for the true CI edge.
-                    if seed_d is not start_seed and res.chisqr > 3.0 * max(prev_chisqr, chi2_min_lsq):
-                        res_retry = _fit_from(start_seed)
+                    # step poisons state["prev"] and every subsequent
+                    # warm-started point in this direction inherits the bad
+                    # basin, showing up as a sustained "spike" near the
+                    # minimum that _find_ci_bounds can mistake for the true
+                    # CI edge.
+                    if state["prev"] is not None and res.chisqr > 3.0 * max(state["prev_chisqr"], chi2_min_lsq):
+                        res_retry = _fit_from(lsq_vals, val)
                         if res_retry.chisqr < res.chisqr:
                             res = res_retry
                     p = res.params.valuesdict()
@@ -1295,8 +1372,8 @@ def do_profile_likelihood_matrix(
                     row["alpha"] = af * (1 - bt) if np.isfinite(af) and np.isfinite(bt) else float("nan")
                     row["alpha_frac"] = af
                     row["Sigma"] = row["alpha"] + bt if np.isfinite(row["alpha"]) and np.isfinite(bt) else float("nan")
-                    prev_d = p
-                    prev_chisqr = res.chisqr
+                    state["prev"] = p
+                    state["prev_chisqr"] = res.chisqr
                 except Exception as e:
                     row = {"scan_val": val, "chisqr": float("nan")}
                     for pn in param_names:
@@ -1306,12 +1383,13 @@ def do_profile_likelihood_matrix(
                     row["alpha_frac"] = float("nan")
                     row["Sigma"] = float("nan")
                     print(f"  {scan_pname}={val:.4g}: failed ({e})")
-                rows_d.append(row)
-            return rows_d
+                return row
 
-        rows = sorted(
-            _run_direction(below, lsq_vals) + _run_direction(above, lsq_vals),
-            key=lambda r: r["scan_val"],
+            return _evaluate
+
+        rows = (
+            _adaptive_scan_direction(ref_val, lo_bound, _make_evaluator())
+            + _adaptive_scan_direction(ref_val, hi_bound, _make_evaluator())
         )
         # Inject the LSQ point itself — the scan grid skips the LSQ value, so without
         # this the profile curve has no point at the true minimum and CI bounds are wrong.
@@ -1326,7 +1404,8 @@ def do_profile_likelihood_matrix(
         rows = sorted(rows, key=lambda r: r["scan_val"])
         df_scan = pd.DataFrame(rows)
         all_scans[scan_pname] = df_scan
-        print(f"  chi-square range: {all_scans[scan_pname]['chisqr'].min():.4g} – {all_scans[scan_pname]['chisqr'].max():.4g}")
+        print(f"  scanned {len(df_scan)} points; chi-square range: "
+              f"{df_scan['chisqr'].min():.4g} – {df_scan['chisqr'].max():.4g}")
 
     # --- rigorous Sigma = alpha + beta profile --------------------------------
     # alpha and beta are strongly correlated, so simply reading Sigma off the
@@ -1339,7 +1418,7 @@ def do_profile_likelihood_matrix(
     # the *entire* (n_resp, beta) level curve for each target S. Same method as
     # do_profile_total_unfolded, duplicated here (rather than shared) so this
     # scan's results land directly in all_scans/the grid.
-    if not replot:
+    if _should_scan("Sigma"):
         _beta_lsq_s = lsq_vals.get("beta", float("nan"))
         _nr_lsq_s = lsq_vals.get("n_resp", float("nan"))
         _af_lsq_s = _nr_lsq_s / (_nr_lsq_s + 1) if np.isfinite(_nr_lsq_s) else float("nan")
@@ -1349,18 +1428,15 @@ def do_profile_likelihood_matrix(
         _NR_MAX_SCAN = 200.0
         _BETA_MIN = 1e-4
         S_hi = (_NR_MAX_SCAN / (_NR_MAX_SCAN + 1.0)) * (1.0 - _BETA_MIN)  # ≈ 0.9949
-        _S_uniform = np.linspace(S_lo, 0.94, max(4, n_points * 2 // 3))
-        _S_dense = S_hi - np.logspace(np.log10(S_hi - 0.94), np.log10(S_hi * 0.001), max(4, n_points // 2))
-        S_vals = np.unique(np.concatenate([_S_uniform, _S_dense]))
-        S_vals = S_vals[(S_vals >= S_lo) & (S_vals <= S_hi)]
-        print(f"\nProfiling Sigma (alpha+beta) over {len(S_vals)} points (bi-directional from {_S_lsq:.4g}) ...")
+        print(f"\nProfiling Sigma (alpha+beta) adaptively from {_S_lsq:.4g}, bounded by [{S_lo:.4g}, {S_hi:.4g}] ...")
 
-        def _run_direction_sigma(vals, start_seed):
-            rows_d, prev_d = [], None
-            for S in vals:
+        def _make_evaluator_sigma():
+            state = {"prev": None}
+
+            def _evaluate(S):
                 S = float(S)
                 params_i = create_fit_params(t)
-                seed_d = prev_d if prev_d is not None else start_seed
+                seed_d = state["prev"] if state["prev"] is not None else lsq_vals
                 for pn, pv in seed_d.items():
                     if pn in params_i and params_i[pn].vary and params_i[pn].expr is None and pn != "beta":
                         params_i[pn].set(value=pv)
@@ -1373,7 +1449,7 @@ def do_profile_likelihood_matrix(
                 if nr_min >= nr_max:
                     nr_min = max(0.1, nr_max * 0.5)
                 nr_warm = float(np.clip(
-                    prev_d["n_resp"] if prev_d is not None else lsq_vals.get("n_resp", 1.0),
+                    state["prev"]["n_resp"] if state["prev"] is not None else lsq_vals.get("n_resp", 1.0),
                     nr_min, nr_max,
                 ))
                 params_i["n_resp"].set(value=nr_warm, min=nr_min, max=nr_max)
@@ -1394,7 +1470,7 @@ def do_profile_likelihood_matrix(
                     row["alpha"] = af * (1 - bt) if np.isfinite(af) and np.isfinite(bt) else float("nan")
                     row["alpha_frac"] = af
                     row["Sigma"] = S
-                    prev_d = p
+                    state["prev"] = p
                 except Exception as e:
                     row = {"scan_val": S, "chisqr": float("nan")}
                     for pn in param_names:
@@ -1404,14 +1480,13 @@ def do_profile_likelihood_matrix(
                     row["alpha_frac"] = float("nan")
                     row["Sigma"] = float("nan")
                     print(f"  S={S:.4f}: failed ({e})")
-                rows_d.append(row)
-            return rows_d
+                return row
 
-        S_below = sorted([v for v in S_vals if v <= _S_lsq], reverse=True)
-        S_above = sorted([v for v in S_vals if v > _S_lsq])
-        rows_sigma = sorted(
-            _run_direction_sigma(S_below, lsq_vals) + _run_direction_sigma(S_above, lsq_vals),
-            key=lambda r_: r_["scan_val"],
+            return _evaluate
+
+        rows_sigma = (
+            _adaptive_scan_direction(_S_lsq, S_lo, _make_evaluator_sigma())
+            + _adaptive_scan_direction(_S_lsq, S_hi, _make_evaluator_sigma())
         )
         lsq_row_sigma = {"scan_val": _S_lsq, "chisqr": chi2_min_lsq}
         for _pn in param_names:
@@ -1422,7 +1497,8 @@ def do_profile_likelihood_matrix(
         lsq_row_sigma["Sigma"] = _S_lsq
         rows_sigma.append(lsq_row_sigma)
         all_scans["Sigma"] = pd.DataFrame(sorted(rows_sigma, key=lambda r_: r_["scan_val"]))
-        print(f"  chi-square range: {all_scans['Sigma']['chisqr'].min():.4g} – {all_scans['Sigma']['chisqr'].max():.4g}")
+        print(f"  scanned {len(all_scans['Sigma'])} points; chi-square range: "
+              f"{all_scans['Sigma']['chisqr'].min():.4g} – {all_scans['Sigma']['chisqr'].max():.4g}")
 
     # --- rigorous alpha = alpha_frac*(1-beta) profile -------------------------
     # Same rationale as Sigma above: alpha depends on both n_resp and beta,
@@ -1434,7 +1510,7 @@ def do_profile_likelihood_matrix(
     # beta = 1 - alpha*(n_resp+1)/n_resp (an lmfit expr) and let n_resp
     # re-optimize freely, correctly searching the entire (n_resp, beta) level
     # curve for each target alpha.
-    if not replot:
+    if _should_scan("alpha"):
         _nr_lsq_a = lsq_vals.get("n_resp", float("nan"))
         _af_lsq_a = _nr_lsq_a / (_nr_lsq_a + 1) if np.isfinite(_nr_lsq_a) else float("nan")
         _beta_lsq_a = lsq_vals.get("beta", float("nan"))
@@ -1446,18 +1522,15 @@ def do_profile_likelihood_matrix(
         _NR_MAX_SCAN = 200.0
         _BETA_MIN = 1e-4
         A_hi = (_NR_MAX_SCAN / (_NR_MAX_SCAN + 1.0)) * (1.0 - _BETA_MIN)  # ≈ 0.9949, same ceiling as Sigma
-        _A_uniform = np.linspace(A_lo, 0.94, max(4, n_points * 2 // 3))
-        _A_dense = A_hi - np.logspace(np.log10(A_hi - 0.94), np.log10(A_hi * 0.001), max(4, n_points // 2))
-        A_vals = np.unique(np.concatenate([_A_uniform, _A_dense]))
-        A_vals = A_vals[(A_vals >= A_lo) & (A_vals <= A_hi)]
-        print(f"\nProfiling alpha over {len(A_vals)} points (bi-directional from {_alpha_lsq_scan:.4g}) ...")
+        print(f"\nProfiling alpha adaptively from {_alpha_lsq_scan:.4g}, bounded by [{A_lo:.4g}, {A_hi:.4g}] ...")
 
-        def _run_direction_alpha(vals, start_seed):
-            rows_d, prev_d = [], None
-            for A in vals:
+        def _make_evaluator_alpha():
+            state = {"prev": None}
+
+            def _evaluate(A):
                 A = float(A)
                 params_i = create_fit_params(t)
-                seed_d = prev_d if prev_d is not None else start_seed
+                seed_d = state["prev"] if state["prev"] is not None else lsq_vals
                 for pn, pv in seed_d.items():
                     if pn in params_i and params_i[pn].vary and params_i[pn].expr is None and pn != "beta":
                         params_i[pn].set(value=pv)
@@ -1479,7 +1552,7 @@ def do_profile_likelihood_matrix(
                 if nr_min >= nr_max:
                     nr_min = max(0.1, nr_max * 0.5)
                 nr_warm = float(np.clip(
-                    prev_d["n_resp"] if prev_d is not None else lsq_vals.get("n_resp", 1.0),
+                    state["prev"]["n_resp"] if state["prev"] is not None else lsq_vals.get("n_resp", 1.0),
                     nr_min, nr_max,
                 ))
                 params_i["n_resp"].set(value=nr_warm, min=nr_min, max=nr_max)
@@ -1500,7 +1573,7 @@ def do_profile_likelihood_matrix(
                     row["alpha"] = A
                     row["alpha_frac"] = af
                     row["Sigma"] = A + bt if np.isfinite(bt) else float("nan")
-                    prev_d = p
+                    state["prev"] = p
                 except Exception as e:
                     row = {"scan_val": A, "chisqr": float("nan")}
                     for pn in param_names:
@@ -1510,14 +1583,13 @@ def do_profile_likelihood_matrix(
                     row["alpha_frac"] = float("nan")
                     row["Sigma"] = float("nan")
                     print(f"  alpha={A:.4f}: failed ({e})")
-                rows_d.append(row)
-            return rows_d
+                return row
 
-        A_below = sorted([v for v in A_vals if v <= _alpha_lsq_scan], reverse=True)
-        A_above = sorted([v for v in A_vals if v > _alpha_lsq_scan])
-        rows_alpha = sorted(
-            _run_direction_alpha(A_below, lsq_vals) + _run_direction_alpha(A_above, lsq_vals),
-            key=lambda r_: r_["scan_val"],
+            return _evaluate
+
+        rows_alpha = (
+            _adaptive_scan_direction(_alpha_lsq_scan, A_lo, _make_evaluator_alpha())
+            + _adaptive_scan_direction(_alpha_lsq_scan, A_hi, _make_evaluator_alpha())
         )
         lsq_row_alpha = {"scan_val": _alpha_lsq_scan, "chisqr": chi2_min_lsq}
         for _pn in param_names:
@@ -1530,7 +1602,193 @@ def do_profile_likelihood_matrix(
         )
         rows_alpha.append(lsq_row_alpha)
         all_scans["alpha"] = pd.DataFrame(sorted(rows_alpha, key=lambda r_: r_["scan_val"]))
-        print(f"  chi-square range: {all_scans['alpha']['chisqr'].min():.4g} – {all_scans['alpha']['chisqr'].max():.4g}")
+        print(f"  scanned {len(all_scans['alpha'])} points; chi-square range: "
+              f"{all_scans['alpha']['chisqr'].min():.4g} – {all_scans['alpha']['chisqr'].max():.4g}")
+
+    # --- rigorous r1 = r0 + delta profile -------------------------------------
+    # Same rationale as Sigma/alpha above: r1 depends on both r0 and delta,
+    # which may be correlated (both jointly place the lit-state peak), so
+    # reading r1 off the delta scan (with r0 unconstrained at each fixed
+    # delta) only checks chi^2 at one point per r1=const level curve, not the
+    # true minimum over the whole curve. Instead, fix r1 exactly via the
+    # algebraic constraint delta = r1 - r0 (an lmfit expr) and let r0
+    # re-optimize freely, correctly searching the entire (r0, delta) level
+    # curve for each target r1.
+    if _should_scan("r1"):
+        _r0_lsq_r1 = lsq_vals.get("r0", float("nan"))
+        _delta_lsq_r1 = lsq_vals.get("delta", float("nan"))
+        _r1_lsq = (
+            _r0_lsq_r1 + _delta_lsq_r1 if np.isfinite(_r0_lsq_r1) and np.isfinite(_delta_lsq_r1) else 4.0
+        )
+
+        _R0_MIN, _R0_MAX = 2.0, 4.5        # r0's own physical bounds (create_fit_params)
+        _DELTA_MIN, _DELTA_MAX = 0.5, 5.0  # delta's own physical bounds (create_fit_params)
+        R1_lo = _R0_MIN + _DELTA_MIN
+        R1_hi = min(_R0_MAX + _DELTA_MAX, 7.0)  # r1 is capped at 7 nm in the model itself
+        print(f"\nProfiling r1 (r0+delta) adaptively from {_r1_lsq:.4g}, bounded by [{R1_lo:.4g}, {R1_hi:.4g}] ...")
+
+        def _make_evaluator_r1():
+            state = {"prev": None}
+
+            def _evaluate(R1):
+                R1 = float(R1)
+                params_i = create_fit_params(t)
+                seed_d = state["prev"] if state["prev"] is not None else lsq_vals
+                for pn, pv in seed_d.items():
+                    if pn in params_i and params_i[pn].vary and params_i[pn].expr is None and pn != "delta":
+                        params_i[pn].set(value=pv)
+                params_i["delta"].set(expr=f"{R1:.8f} - r0")
+                # delta(r0) = R1 - r0 decreases as r0 increases; bracket r0 so
+                # delta stays within its normal [0.5, 5] range -- an
+                # expr-derived parameter isn't clamped by its own min/max, so
+                # an unbracketed r0 can drive delta to nonphysical values.
+                r0_min = max(_R0_MIN, R1 - _DELTA_MAX)
+                r0_max = min(_R0_MAX, R1 - _DELTA_MIN)
+                if r0_min >= r0_max:
+                    r0_min = max(_R0_MIN, r0_max - 0.1)
+                r0_warm = float(np.clip(
+                    state["prev"]["r0"] if state["prev"] is not None else lsq_vals.get("r0", 3.0),
+                    r0_min, r0_max,
+                ))
+                params_i["r0"].set(value=r0_warm, min=r0_min, max=r0_max)
+                try:
+                    res = lmfit.minimize(
+                        fit_function, params_i, method="least_squares",
+                        args=fit_args, kws={"sigma_noise": sigma_noise},
+                        x_scale="jac", max_nfev=2000, xtol=1e-5, ftol=1e-5,
+                    )
+                    p = res.params.valuesdict()
+                    row = {"scan_val": R1, "chisqr": res.chisqr}
+                    for pn in param_names:
+                        row[pn] = p.get(pn, float("nan"))
+                    row["r1"] = R1
+                    nr = p.get("n_resp", float("nan"))
+                    bt = p.get("beta", float("nan"))
+                    af = nr / (nr + 1) if np.isfinite(nr) else float("nan")
+                    row["alpha"] = af * (1 - bt) if np.isfinite(af) and np.isfinite(bt) else float("nan")
+                    row["alpha_frac"] = af
+                    row["Sigma"] = row["alpha"] + bt if np.isfinite(row["alpha"]) and np.isfinite(bt) else float("nan")
+                    state["prev"] = p
+                except Exception as e:
+                    row = {"scan_val": R1, "chisqr": float("nan")}
+                    for pn in param_names:
+                        row[pn] = float("nan")
+                    row["r1"] = float("nan")
+                    row["alpha"] = float("nan")
+                    row["alpha_frac"] = float("nan")
+                    row["Sigma"] = float("nan")
+                    print(f"  r1={R1:.4f}: failed ({e})")
+                return row
+
+            return _evaluate
+
+        rows_r1 = (
+            _adaptive_scan_direction(_r1_lsq, R1_lo, _make_evaluator_r1())
+            + _adaptive_scan_direction(_r1_lsq, R1_hi, _make_evaluator_r1())
+        )
+        lsq_row_r1 = {"scan_val": _r1_lsq, "chisqr": chi2_min_lsq}
+        for _pn in param_names:
+            lsq_row_r1[_pn] = float(lsq_vals.get(_pn, float("nan")))
+        lsq_row_r1["r1"] = _r1_lsq
+        _nr_lsq_r1v = lsq_vals.get("n_resp", float("nan"))
+        _af_lsq_r1v = _nr_lsq_r1v / (_nr_lsq_r1v + 1) if np.isfinite(_nr_lsq_r1v) else float("nan")
+        _beta_lsq_r1v = lsq_vals.get("beta", float("nan"))
+        lsq_row_r1["alpha"] = (
+            _af_lsq_r1v * (1 - _beta_lsq_r1v) if np.isfinite(_af_lsq_r1v) and np.isfinite(_beta_lsq_r1v) else float("nan")
+        )
+        lsq_row_r1["alpha_frac"] = float(_af_lsq_r1v) if np.isfinite(_af_lsq_r1v) else float("nan")
+        lsq_row_r1["Sigma"] = (
+            lsq_row_r1["alpha"] + _beta_lsq_r1v if np.isfinite(lsq_row_r1["alpha"]) and np.isfinite(_beta_lsq_r1v) else float("nan")
+        )
+        rows_r1.append(lsq_row_r1)
+        all_scans["r1"] = pd.DataFrame(sorted(rows_r1, key=lambda r_: r_["scan_val"]))
+        print(f"  scanned {len(all_scans['r1'])} points; chi-square range: "
+              f"{all_scans['r1']['chisqr'].min():.4g} – {all_scans['r1']['chisqr'].max():.4g}")
+
+    # --- rigorous alpha_frac = n_resp/(n_resp+1) profile -----------------------
+    # alpha_frac depends on n_resp alone, so unlike Sigma/alpha it needs no
+    # beta-bracketing reparametrization -- n_resp can just be fixed directly.
+    # But reading it off the *generic* n_resp scan (the old approach) still
+    # gives badly non-uniform sampling in alpha_frac space: alpha_frac =
+    # n_resp/(n_resp+1) compresses hard for large n_resp and stretches hard
+    # for small n_resp, so a step size that's sensible in n_resp units (where
+    # the generic scan above steps) is wildly wrong in alpha_frac units --
+    # most of a wide n_resp range maps to a tiny sliver near alpha_frac=1,
+    # while the last, "unremarkable" n_resp step before hitting a low bound
+    # or the LSQ's own local basin can swing alpha_frac by 0.4+ in one go.
+    # This scan instead steps directly in alpha_frac, computing
+    # n_resp = alpha_frac/(1-alpha_frac) exactly at each target.
+    if _should_scan("alpha_frac"):
+        _nr_lsq_af = lsq_vals.get("n_resp", float("nan"))
+        _alpha_frac_lsq = _nr_lsq_af / (_nr_lsq_af + 1) if np.isfinite(_nr_lsq_af) else 0.5
+
+        _NR_MIN_SCAN_AF = ref_params["n_resp"].min
+        _NR_MAX_SCAN_AF = ref_params["n_resp"].max
+        AF_lo = _NR_MIN_SCAN_AF / (_NR_MIN_SCAN_AF + 1)
+        AF_hi = _NR_MAX_SCAN_AF / (_NR_MAX_SCAN_AF + 1)
+        print(f"\nProfiling alpha_frac adaptively from {_alpha_frac_lsq:.4g}, bounded by [{AF_lo:.4g}, {AF_hi:.4g}] ...")
+
+        def _make_evaluator_alpha_frac():
+            state = {"prev": None}
+
+            def _evaluate(AF):
+                AF = float(AF)
+                params_i = create_fit_params(t)
+                seed_d = state["prev"] if state["prev"] is not None else lsq_vals
+                for pn, pv in seed_d.items():
+                    if pn in params_i and params_i[pn].vary and params_i[pn].expr is None and pn != "n_resp":
+                        params_i[pn].set(value=pv)
+                nr_target = AF / (1.0 - AF)
+                params_i["n_resp"].set(value=nr_target, vary=False)
+                try:
+                    res = lmfit.minimize(
+                        fit_function, params_i, method="least_squares",
+                        args=fit_args, kws={"sigma_noise": sigma_noise},
+                        x_scale="jac", max_nfev=2000, xtol=1e-5, ftol=1e-5,
+                    )
+                    p = res.params.valuesdict()
+                    row = {"scan_val": AF, "chisqr": res.chisqr}
+                    for pn in param_names:
+                        row[pn] = p.get(pn, float("nan"))
+                    row["r1"] = p.get("r0", float("nan")) + p.get("delta", float("nan"))
+                    bt = p.get("beta", float("nan"))
+                    row["alpha"] = AF * (1 - bt) if np.isfinite(bt) else float("nan")
+                    row["alpha_frac"] = AF
+                    row["Sigma"] = row["alpha"] + bt if np.isfinite(row["alpha"]) and np.isfinite(bt) else float("nan")
+                    state["prev"] = p
+                except Exception as e:
+                    row = {"scan_val": AF, "chisqr": float("nan")}
+                    for pn in param_names:
+                        row[pn] = float("nan")
+                    row["r1"] = float("nan")
+                    row["alpha"] = float("nan")
+                    row["alpha_frac"] = float("nan")
+                    row["Sigma"] = float("nan")
+                    print(f"  alpha_frac={AF:.4f}: failed ({e})")
+                return row
+
+            return _evaluate
+
+        rows_af = (
+            _adaptive_scan_direction(_alpha_frac_lsq, AF_lo, _make_evaluator_alpha_frac())
+            + _adaptive_scan_direction(_alpha_frac_lsq, AF_hi, _make_evaluator_alpha_frac())
+        )
+        lsq_row_af = {"scan_val": _alpha_frac_lsq, "chisqr": chi2_min_lsq}
+        for _pn in param_names:
+            lsq_row_af[_pn] = float(lsq_vals.get(_pn, float("nan")))
+        lsq_row_af["r1"] = float(lsq_vals.get("r0", float("nan"))) + float(lsq_vals.get("delta", float("nan")))
+        _beta_lsq_af = lsq_vals.get("beta", float("nan"))
+        lsq_row_af["alpha"] = (
+            _alpha_frac_lsq * (1 - _beta_lsq_af) if np.isfinite(_beta_lsq_af) else float("nan")
+        )
+        lsq_row_af["alpha_frac"] = _alpha_frac_lsq
+        lsq_row_af["Sigma"] = (
+            lsq_row_af["alpha"] + _beta_lsq_af if np.isfinite(lsq_row_af["alpha"]) and np.isfinite(_beta_lsq_af) else float("nan")
+        )
+        rows_af.append(lsq_row_af)
+        all_scans["alpha_frac"] = pd.DataFrame(sorted(rows_af, key=lambda r_: r_["scan_val"]))
+        print(f"  scanned {len(all_scans['alpha_frac'])} points; chi-square range: "
+              f"{all_scans['alpha_frac']['chisqr'].min():.4g} – {all_scans['alpha_frac']['chisqr'].max():.4g}")
 
     out_txt = fits_path / "profile_matrix_scans.txt"
     with open(out_txt, "w") as fh:
@@ -1697,51 +1955,32 @@ def do_profile_likelihood_matrix(
         df_s = all_scans.get(pn)
         if df_s is None:
             continue
-        if pn == "n_resp":
-            # alpha_frac = n_resp/(n_resp+1) alone (no beta factor) -- since n_resp
-            # was fixed and everything else (including beta) re-optimized at each
-            # scan point, this n_resp profile IS the alpha_frac profile likelihood;
-            # no separate scan needed. (alpha itself now has its own rigorous
-            # scan, all_scans["alpha"], handled separately below -- see the
-            # comment there for why: alpha depends on both n_resp and beta,
-            # which are correlated, so it can't be read off this scan the way
-            # alpha_frac can.)
-            lo_nr, hi_nr, sl_nr, sh_nr = _find_ci_bounds(
-                df_s["scan_val"], df_s["chisqr"], log_x=_is_log_param(pn),
-                x_hard_min=ref_params["n_resp"].min, x_hard_max=ref_params["n_resp"].max,
-            )
-            def _nr_to_alpha_frac(v):
-                return v / (v + 1) if v is not None and np.isfinite(v) else None
-            lo_af = _nr_to_alpha_frac(lo_nr)
-            hi_af = _nr_to_alpha_frac(hi_nr)
-            ci_bounds["alpha_frac"] = (lo_af, hi_af)
-            sigma_bounds["alpha_frac"] = (_nr_to_alpha_frac(sl_nr), _nr_to_alpha_frac(sh_nr))
-            _nr_lsq_ci = lsq_vals.get("n_resp", float("nan"))
-            lv_af = _nr_lsq_ci / (_nr_lsq_ci + 1)
-            lo_af_str = f"{lo_af:.4g}" if lo_af is not None else "<scan_min"
-            hi_af_str = f"{hi_af:.4g}" if hi_af is not None else ">scan_max"
-            print(f"  {'alpha_frac':<10} {lv_af:>10.4g} {lo_af_str:>12} {hi_af_str:>12}")
-        else:
-            _p_obj = ref_params[pn]
-            _hard_lo = _p_obj.min if np.isfinite(_p_obj.min) else None
-            _hard_hi = _p_obj.max if np.isfinite(_p_obj.max) else None
-            lo, hi, sl, sh = _find_ci_bounds(
-                df_s["scan_val"], df_s["chisqr"], log_x=_is_log_param(pn),
-                x_hard_min=_hard_lo, x_hard_max=_hard_hi,
-            )
-            ci_bounds[pn] = (lo, hi)
-            sigma_bounds[pn] = (sl, sh)
-            _ps = float(field_interp[-1] - field_interp[0]) / 2.0 if pn == "shift" else 1.0
-            _disp_lo = lo * _ps if lo is not None else None
-            _disp_hi = hi * _ps if hi is not None else None
-            lo_str = f"{_disp_lo:.4g}" if _disp_lo is not None else "<scan_min"
-            hi_str = f"{_disp_hi:.4g}" if _disp_hi is not None else ">scan_max"
-            lv = lsq_vals.get(pn, float("nan")) * _ps
-            print(f"  {pn:<10} {lv:>10.4g} {lo_str:>12} {hi_str:>12}")
-    # r1 via delta scan — r1 is linearly spaced (it's a distance, not log-param)
-    if "delta" in all_scans:
-        df_d = all_scans["delta"]
-        lo, hi, sl, sh = _find_ci_bounds(df_d["r1"], df_d["chisqr"], log_x=False)
+        # n_resp itself has no direct physical meaning (it's the
+        # reparametrization trick that lets alpha_frac approach 1 without
+        # hitting a hard boundary) -- its own CI here is just for
+        # completeness/debugging. alpha_frac's actual CI comes from its own
+        # dedicated scan, all_scans["alpha_frac"], handled below.
+        _p_obj = ref_params[pn]
+        _hard_lo = _p_obj.min if np.isfinite(_p_obj.min) else None
+        _hard_hi = _p_obj.max if np.isfinite(_p_obj.max) else None
+        lo, hi, sl, sh = _find_ci_bounds(
+            df_s["scan_val"], df_s["chisqr"], log_x=_is_log_param(pn),
+            x_hard_min=_hard_lo, x_hard_max=_hard_hi,
+        )
+        ci_bounds[pn] = (lo, hi)
+        sigma_bounds[pn] = (sl, sh)
+        _ps = float(field_interp[-1] - field_interp[0]) / 2.0 if pn == "shift" else 1.0
+        _disp_lo = lo * _ps if lo is not None else None
+        _disp_hi = hi * _ps if hi is not None else None
+        lo_str = f"{_disp_lo:.4g}" if _disp_lo is not None else "<scan_min"
+        hi_str = f"{_disp_hi:.4g}" if _disp_hi is not None else ">scan_max"
+        lv = lsq_vals.get(pn, float("nan")) * _ps
+        print(f"  {pn:<10} {lv:>10.4g} {lo_str:>12} {hi_str:>12}")
+    # r1 = r0 + delta, from its own rigorous scan (all_scans["r1"], built
+    # above) -- not a conversion of the delta scan.
+    if "r1" in all_scans:
+        df_R1 = all_scans["r1"]
+        lo, hi, sl, sh = _find_ci_bounds(df_R1["scan_val"], df_R1["chisqr"], log_x=False)
         ci_bounds["r1"] = (lo, hi)
         sigma_bounds["r1"] = (sl, sh)
         r1_lsq = lsq_vals.get("r0", 0) + lsq_vals.get("delta", 0)
@@ -1780,6 +2019,21 @@ def do_profile_likelihood_matrix(
         lo_str = f"{lo:.4g}" if lo is not None else "<scan_min"
         hi_str = f"{hi:.4g}" if hi is not None else ">scan_max"
         print(f"  {'alpha':<10} {_alpha_lsq_ci:>10.4g} {lo_str:>12} {hi_str:>12}")
+
+    # alpha_frac = n_resp/(n_resp+1), from its own rigorous scan
+    # (all_scans["alpha_frac"], built above) -- not a conversion of the
+    # generic n_resp scan.
+    if "alpha_frac" in all_scans:
+        df_AF = all_scans["alpha_frac"]
+        # alpha_frac is also a fraction, physically bounded in [0, 1].
+        lo, hi, sl, sh = _find_ci_bounds(df_AF["scan_val"], df_AF["chisqr"], log_x=False, x_hard_min=0.0, x_hard_max=1.0)
+        ci_bounds["alpha_frac"] = (lo, hi)
+        sigma_bounds["alpha_frac"] = (sl, sh)
+        _nr_lsq_af_ci = lsq_vals.get("n_resp", float("nan"))
+        _alpha_frac_lsq_ci = _nr_lsq_af_ci / (_nr_lsq_af_ci + 1) if np.isfinite(_nr_lsq_af_ci) else float("nan")
+        lo_str = f"{lo:.4g}" if lo is not None else "<scan_min"
+        hi_str = f"{hi:.4g}" if hi is not None else ">scan_max"
+        print(f"  {'alpha_frac':<10} {_alpha_frac_lsq_ci:>10.4g} {lo_str:>12} {hi_str:>12}")
 
     # save CI table
     _nr_lsq = lsq_vals.get("n_resp", float("nan"))
@@ -1839,32 +2093,26 @@ def do_profile_likelihood_matrix(
                 ax.set_visible(False)
                 continue
 
-            # helpers: alpha_frac is displayed but n_resp is the actual scan key
-            # (alpha_frac depends on n_resp alone, so no separate scan is
-            # needed); alpha and Sigma each have their own real rigorous scan
-            # (all_scans["alpha"], all_scans["Sigma"]) now, so they're treated
-            # like any other directly-scanned quantity below.
+            # helpers: alpha, alpha_frac, Sigma, and r1 each have their own
+            # real rigorous scan now (all_scans["alpha"], all_scans["alpha_frac"],
+            # etc.), so they're all treated like any other directly-scanned
+            # quantity below -- no special-casing needed.
             def _scan_key(pname):
-                return "n_resp" if pname == "alpha_frac" else pname
+                return pname
 
             def _scan_x_col(pname):
-                return pname if pname == "alpha_frac" else "scan_val"
+                return "scan_val"
 
             def _covar_col(pname):
                 return pname
 
             if row == col:
-                # diagonal: chi-square profile for this parameter
-                # r1 is derived (r0+delta), not scanned directly — use delta scan as proxy.
-                # Use the r1 column already computed per-row (= r0_fitted + delta_fixed),
-                # not r0_lsq + delta, since r0 moves when delta is constrained.
+                # diagonal: chi-square profile for this parameter. r1 has its
+                # own rigorous scan (all_scans["r1"]) now, same as Sigma/alpha,
+                # so it's treated like any other directly-scanned quantity.
                 _diag_col = "chisqr"
-                if row_name == "r1" and "delta" in all_scans:
-                    _df_diag = all_scans["delta"]
-                    _diag_x_col = "r1"
-                else:
-                    _df_diag = all_scans.get(_scan_key(row_name))
-                    _diag_x_col = _scan_x_col(row_name)
+                _df_diag = all_scans.get(_scan_key(row_name))
+                _diag_x_col = _scan_x_col(row_name)
                 if _df_diag is not None:
                     _xs = _shift_scale if row_name == "shift" else 1.0
                     x_data = _df_diag[_diag_x_col] * _xs
@@ -1958,12 +2206,8 @@ def do_profile_likelihood_matrix(
 
     for _pi, row_name in enumerate(plot_cols):
         ax = axes_pub_flat[_pi]
-        if row_name == "r1" and "delta" in all_scans:
-            _df_diag = all_scans["delta"]
-            _diag_x_col = "r1"
-        else:
-            _df_diag = all_scans.get(_scan_key(row_name))
-            _diag_x_col = _scan_x_col(row_name)
+        _df_diag = all_scans.get(_scan_key(row_name))
+        _diag_x_col = _scan_x_col(row_name)
         if _df_diag is None:
             ax.set_visible(False)
             continue
@@ -3655,7 +3899,7 @@ if __name__ == "__main__":
         # both would just duplicate that scan for a near-identical CI. Set
         # PROFILE_TOTAL_UNFOLDED=True separately if you want its standalone
         # profile_total_unfolded.png.
-        do_profile_likelihood_matrix(broadened_f, intrinsic_f, pake_patterns, n_points=20, **_speedup)
+        do_profile_likelihood_matrix(broadened_f, intrinsic_f, pake_patterns, n_points=20, rescan_only=RESCAN_ONLY, **_speedup)
     if REPLOT_PROFILE_MATRIX:
         do_profile_likelihood_matrix(broadened_f, intrinsic_f, pake_patterns, replot=True, **_speedup)
     if PROFILE_TOTAL_UNFOLDED:
