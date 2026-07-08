@@ -465,8 +465,8 @@ def estimate_n_eff(data_2d=None, field=None, field_smooth_sigma=1.5, n_time_inde
         ax.set_xlim(0, min(lags[-1], cutoff * field_spacing * 5))
         ax.legend(handlelength=0.75, labelspacing=0.25, fontsize=10)
         ax.text(0.97, 0.95,
-                f"$N_{{\\rm eff,field}}$ = {n_eff_field:.1f}\n"
-                # f"$N_{{\\rm eff}}$ = {n_eff_total:.1f}  ($\\times${n_time_independent})",
+                f"$N_\\mathrm{{eff}}^\\mathrm{{field}}$ = {n_eff_field:.1f}"
+                # f"\n$N_{{\\rm eff}}$ = {n_eff_total:.1f}  ($\\times${n_time_independent})",
                 ,
                 transform=ax.transAxes, ha="right", va="top", fontsize=10,
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="white", edgecolor="#aaa"))
@@ -759,8 +759,8 @@ def create_fit_params(t):
         tau_1=dict(  # noqa: C408
             value=np.max(t) / 200,
             vary=True,
-            min=np.max(t) / 500,
-            max=np.max(t) / 50,
+            min=min(np.max(t) / 500, 0.1),
+            max=max(np.max(t) / 50, 20),
         ),
         tau_2=dict(  # noqa: C408
             value=100,
@@ -1587,19 +1587,28 @@ def do_profile_likelihood_matrix(
         hi = p.max if np.isfinite(p.max) else p.value * 100
         return lo > 0 and hi / lo > 20
 
-    def _find_ci_bounds(x_vals, chi_vals, log_x=False, n_parabola=12):
-        """Threshold crossing via interpolation; parabola-curvature extrapolation fallback.
+    def _find_ci_bounds(x_vals, chi_vals, log_x=False, n_parabola=12, x_hard_min=None, x_hard_max=None):
+        """The 95% CI bound is found by linear interpolation between adjacent
+        scan points that straddle the chi-square threshold, walking outward
+        from the minimum and stopping at the first crossing per side (see the
+        comment below). If the scan never crosses the threshold on a given
+        side, that bound is reported as unresolved (None ->
+        ">scan_max"/"<scan_min") -- there is no extrapolation fallback for
+        the 95% bound itself; a parabola fit to the innermost points is used
+        only for the secondary ±1σ estimate (below), which is explicitly an
+        approximation and displayed as such.
 
         All fitting is done in log10(x) space for log-spaced parameters.
 
-        Primary:  linear interpolation between adjacent scan points that straddle
-                  the threshold.
-        Fallback: fit a parabola to the n_parabola inner-most (lowest chi-square)
-                  points and solve analytically for the crossing.
-
         Returns (lower, upper, sigma_lo, sigma_hi) where sigma_lo/hi are the
-        ±1σ bounds from the parabola curvature (Δχ²=1 crossing), always finite
-        when a positive-curvature parabola can be fit.
+        ±1σ bounds from the parabola curvature (Δχ²=chi2_min/N_eff crossing),
+        always finite when a positive-curvature parabola can be fit.
+
+        x_hard_min/x_hard_max: the quantity's true valid domain (e.g. a
+        parameter's own lmfit min/max, or [0, 1] for a fraction like
+        alpha/alpha_frac/Sigma) -- retained as a belt-and-suspenders clamp on
+        the interpolated bound, though interpolation alone (unlike the old
+        parabola fallback) can't produce a value outside the scanned range.
         """
         x = np.asarray(x_vals, dtype=float)
         c = np.asarray(chi_vals, dtype=float)
@@ -1631,7 +1640,16 @@ def do_profile_likelihood_matrix(
                 upper = 10 ** xi_cross if log_x else xi_cross
                 break
 
-        # --- parabola fit: CI fallback + always compute ±1σ from curvature ---
+        # --- parabola fit: ±1σ from curvature only -- NOT a 95% CI fallback ---
+        # The 95% CI bound is reported strictly from the direct interpolation
+        # above: either the scan crosses the threshold (lower/upper set) or it
+        # doesn't, in which case the bound stays None (">scan_max"/"<scan_min",
+        # rendered as a dagger). Extrapolating a specific number from local
+        # curvature when the scan never actually reached the threshold produced
+        # a real bug (an extrapolated Sigma=alpha+beta upper bound of 1.15,
+        # impossible for a quantity capped at 1) -- so this fit is used only
+        # for the secondary ±1σ band, which is explicitly an approximation
+        # and displayed as such, not for the primary CI bound itself.
         sigma_lo = sigma_hi = None
         inner = np.argsort(c)[:n_parabola]
         if len(inner) >= 3:
@@ -1639,20 +1657,6 @@ def do_profile_likelihood_matrix(
                 a_p, b_p, c_p = np.polyfit(xi[inner], c[inner], 2)
                 if a_p > 0:
                     xi_star = -b_p / (2 * a_p)
-                    # 95% CI crossings from parabola
-                    disc = b_p ** 2 - 4 * a_p * (c_p - threshold_val)
-                    if disc >= 0:
-                        sq = np.sqrt(disc)
-                        xi_lo_95 = (-b_p - sq) / (2 * a_p)
-                        xi_hi_95 = (-b_p + sq) / (2 * a_p)
-                        if lower is None and xi_lo_95 < xi_star:
-                            v = float(10 ** xi_lo_95 if log_x else xi_lo_95)
-                            if np.isfinite(v):
-                                lower = v
-                        if upper is None and xi_hi_95 > xi_star:
-                            v = float(10 ** xi_hi_95 if log_x else xi_hi_95)
-                            if np.isfinite(v):
-                                upper = v
                     # ±1σ from curvature: Δχ²=chi2_min/N_eff crossing (rescaled Wilks)
                     sig_xi = np.sqrt((chi2_min_lsq / n_eff_total) / a_p)
                     sl = float(10 ** (xi_star - sig_xi) if log_x else (xi_star - sig_xi))
@@ -1678,6 +1682,10 @@ def do_profile_likelihood_matrix(
             lower = None
         if upper is not None and (not np.isfinite(upper) or upper > x_hi_scan * 1000):
             upper = None
+        if x_hard_min is not None and lower is not None and lower < x_hard_min:
+            lower = None
+        if x_hard_max is not None and upper is not None and upper > x_hard_max:
+            upper = None
 
         return lower, upper, sigma_lo, sigma_hi
 
@@ -1698,7 +1706,10 @@ def do_profile_likelihood_matrix(
             # comment there for why: alpha depends on both n_resp and beta,
             # which are correlated, so it can't be read off this scan the way
             # alpha_frac can.)
-            lo_nr, hi_nr, sl_nr, sh_nr = _find_ci_bounds(df_s["scan_val"], df_s["chisqr"], log_x=_is_log_param(pn))
+            lo_nr, hi_nr, sl_nr, sh_nr = _find_ci_bounds(
+                df_s["scan_val"], df_s["chisqr"], log_x=_is_log_param(pn),
+                x_hard_min=ref_params["n_resp"].min, x_hard_max=ref_params["n_resp"].max,
+            )
             def _nr_to_alpha_frac(v):
                 return v / (v + 1) if v is not None and np.isfinite(v) else None
             lo_af = _nr_to_alpha_frac(lo_nr)
@@ -1711,7 +1722,13 @@ def do_profile_likelihood_matrix(
             hi_af_str = f"{hi_af:.4g}" if hi_af is not None else ">scan_max"
             print(f"  {'alpha_frac':<10} {lv_af:>10.4g} {lo_af_str:>12} {hi_af_str:>12}")
         else:
-            lo, hi, sl, sh = _find_ci_bounds(df_s["scan_val"], df_s["chisqr"], log_x=_is_log_param(pn))
+            _p_obj = ref_params[pn]
+            _hard_lo = _p_obj.min if np.isfinite(_p_obj.min) else None
+            _hard_hi = _p_obj.max if np.isfinite(_p_obj.max) else None
+            lo, hi, sl, sh = _find_ci_bounds(
+                df_s["scan_val"], df_s["chisqr"], log_x=_is_log_param(pn),
+                x_hard_min=_hard_lo, x_hard_max=_hard_hi,
+            )
             ci_bounds[pn] = (lo, hi)
             sigma_bounds[pn] = (sl, sh)
             _ps = float(field_interp[-1] - field_interp[0]) / 2.0 if pn == "shift" else 1.0
@@ -1736,7 +1753,10 @@ def do_profile_likelihood_matrix(
     # built above) -- not a conversion of the n_resp scan.
     if "Sigma" in all_scans:
         df_S = all_scans["Sigma"]
-        lo, hi, sl, sh = _find_ci_bounds(df_S["scan_val"], df_S["chisqr"], log_x=False)
+        # Sigma = alpha + beta is a sum of two fractions, physically bounded
+        # in [0, 1] (can't have more than 100% unfolded) -- clip the parabola
+        # extrapolation to that domain rather than reporting e.g. 1.15.
+        lo, hi, sl, sh = _find_ci_bounds(df_S["scan_val"], df_S["chisqr"], log_x=False, x_hard_min=0.0, x_hard_max=1.0)
         ci_bounds["Sigma"] = (lo, hi)
         sigma_bounds["Sigma"] = (sl, sh)
         _S_lsq_ci = lsq_vals.get("beta", 0) + (
@@ -1750,7 +1770,8 @@ def do_profile_likelihood_matrix(
     # built above) -- not a conversion of the n_resp scan.
     if "alpha" in all_scans:
         df_A = all_scans["alpha"]
-        lo, hi, sl, sh = _find_ci_bounds(df_A["scan_val"], df_A["chisqr"], log_x=False)
+        # alpha = alpha_frac*(1-beta) is also a fraction, physically bounded in [0, 1].
+        lo, hi, sl, sh = _find_ci_bounds(df_A["scan_val"], df_A["chisqr"], log_x=False, x_hard_min=0.0, x_hard_max=1.0)
         ci_bounds["alpha"] = (lo, hi)
         sigma_bounds["alpha"] = (sl, sh)
         _alpha_lsq_ci = (
@@ -1860,17 +1881,7 @@ def do_profile_likelihood_matrix(
                     else:
                         ax.text(0.05, 0.95, f"CI thresh\n{threshold_val:.3g}\n(off-plot)",
                                 transform=ax.transAxes, fontsize=4, va="top", color="red")
-                    # ±1σ shaded band from parabola curvature (always shown when available)
-                    sig_lo, sig_hi = sigma_bounds.get(row_name, (None, None))
                     x_lo_plot, x_hi_plot = float(x_data.min()), float(x_data.max())
-                    if sig_lo is not None and sig_hi is not None:
-                        sl_clipped = max(sig_lo * _xs, x_lo_plot)
-                        sh_clipped = min(sig_hi * _xs, x_hi_plot)
-                        if sl_clipped < sh_clipped:
-                            ax.axvspan(sl_clipped, sh_clipped, alpha=0.12, color="C0", lw=0)
-                        ax.text(0.97, 0.95, r"$\pm1\sigma$" + f"\n[{sig_lo*_xs:.3g}, {sig_hi*_xs:.3g}]",
-                                transform=ax.transAxes, fontsize=3.5, va="top", ha="right",
-                                color="C0")
                     # CI crossing lines — only draw if within the plot x-range
                     ci_lo, ci_hi = ci_bounds.get(row_name, (None, None))
                     off_notes = []
@@ -1969,13 +1980,6 @@ def do_profile_likelihood_matrix(
         for _cv in (ci_lo, ci_hi):
             if _cv is not None and x_lo_plot <= _cv * _xs <= x_hi_plot:
                 ax.axvline(_cv * _xs, ls="-", c="red", lw=0.8, alpha=0.7)
-        # ±1σ shaded band
-        sig_lo, sig_hi = sigma_bounds.get(row_name, (None, None))
-        if sig_lo is not None and sig_hi is not None:
-            sl_c = max(sig_lo * _xs, x_lo_plot)
-            sh_c = min(sig_hi * _xs, x_hi_plot)
-            if sl_c < sh_c:
-                ax.axvspan(sl_c, sh_c, alpha=0.12, color="C0", lw=0)
         _data_max = float(_df_diag["chisqr"].max())
         _data_min = float(_df_diag["chisqr"].min())
         ax.set_ylim(bottom=_data_min * 0.999, top=max(_data_max, threshold_val) * 1.02)
@@ -2139,7 +2143,6 @@ def do_profile_total_unfolded(
                 for pn in param_names:
                     row[pn] = p.get(pn, float("nan"))
                 prev_d = p
-                print(f"  S={S:.4f}  chisqr={res.chisqr:.6g}  beta={bt:.4f}  alpha={al:.4f}")
             except Exception as e:
                 row = {"scan_val": S, "chisqr": float("nan"), "beta": float("nan"), "alpha": float("nan")}
                 for pn in param_names:
@@ -3646,8 +3649,13 @@ if __name__ == "__main__":
     # at each point, so that n_resp profile IS the alpha_frac profile
     # likelihood; no separate scan/plot needed.
     if RUN_PROFILE_MATRIX:
+        # do_profile_total_unfolded is NOT also called here: the grid's own
+        # Sigma=alpha+beta panel already runs the identical rigorous
+        # reparametrized scan (see do_profile_likelihood_matrix), so calling
+        # both would just duplicate that scan for a near-identical CI. Set
+        # PROFILE_TOTAL_UNFOLDED=True separately if you want its standalone
+        # profile_total_unfolded.png.
         do_profile_likelihood_matrix(broadened_f, intrinsic_f, pake_patterns, n_points=20, **_speedup)
-        do_profile_total_unfolded(broadened_f, intrinsic_f, pake_patterns, n_points=20, **_speedup)
     if REPLOT_PROFILE_MATRIX:
         do_profile_likelihood_matrix(broadened_f, intrinsic_f, pake_patterns, replot=True, **_speedup)
     if PROFILE_TOTAL_UNFOLDED:
