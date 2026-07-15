@@ -1437,12 +1437,12 @@ def do_profile_likelihood_matrix(
                 all_scans[_cur_pname] = pd.read_csv(
                     io.StringIO("".join(_cur_rows)), sep=r"\s+", engine="python"
                 )
-        # "Sigma", "alpha", and "r1" are derived/reparametrized scans (see
-        # below), not among the model's own free lmfit parameters -- exclude
-        # them here so downstream code that treats param_names as "the real
-        # free parameters" (e.g. ref_params[scan_pname] lookups) doesn't
-        # choke on them.
-        param_names = [k for k in all_scans.keys() if k not in ("Sigma", "alpha", "r1")]
+        # "Sigma", "alpha", "r1", and "alpha_frac" are derived/reparametrized
+        # scans (see below), not among the model's own free lmfit parameters
+        # -- exclude them here so downstream code that treats param_names as
+        # "the real free parameters" (e.g. ref_params[scan_pname] lookups)
+        # doesn't choke on them.
+        param_names = [k for k in all_scans.keys() if k not in ("Sigma", "alpha", "r1", "alpha_frac")]
         print(f"Loaded saved scans for: {param_names}")
     else:
         all_scans = {}
@@ -1843,6 +1843,91 @@ def do_profile_likelihood_matrix(
         print(f"  scanned {len(all_scans['r1'])} points; chi-square range: "
               f"{all_scans['r1']['chisqr'].min():.4g} – {all_scans['r1']['chisqr'].max():.4g}")
 
+    # --- rigorous alpha_frac = n_resp/(n_resp+1) profile -----------------------
+    # alpha_frac depends on n_resp alone, so unlike Sigma/alpha it needs no
+    # beta-bracketing reparametrization -- n_resp can just be fixed directly.
+    # But reading it off the *generic* n_resp scan (the old approach) still
+    # gives badly non-uniform sampling in alpha_frac space: alpha_frac =
+    # n_resp/(n_resp+1) compresses hard for large n_resp and stretches hard
+    # for small n_resp, so a step size that's sensible in n_resp units (where
+    # the generic scan above steps) is wildly wrong in alpha_frac units --
+    # most of a wide n_resp range maps to a tiny sliver near alpha_frac=1,
+    # while the last, "unremarkable" n_resp step before hitting a low bound
+    # or the LSQ's own local basin can swing alpha_frac by 0.4+ in one go.
+    # This scan instead steps directly in alpha_frac, computing
+    # n_resp = alpha_frac/(1-alpha_frac) exactly at each target.
+    if not replot:
+        _nr_lsq_af = lsq_vals.get("n_resp", float("nan"))
+        _alpha_frac_lsq = _nr_lsq_af / (_nr_lsq_af + 1) if np.isfinite(_nr_lsq_af) else 0.5
+
+        _NR_MIN_SCAN_AF = ref_params["n_resp"].min
+        _NR_MAX_SCAN_AF = ref_params["n_resp"].max
+        AF_lo = _NR_MIN_SCAN_AF / (_NR_MIN_SCAN_AF + 1)
+        AF_hi = _NR_MAX_SCAN_AF / (_NR_MAX_SCAN_AF + 1)
+        print(f"\nProfiling alpha_frac adaptively from {_alpha_frac_lsq:.4g}, bounded by [{AF_lo:.4g}, {AF_hi:.4g}] ...")
+
+        def _make_evaluator_alpha_frac():
+            state = {"prev": None}
+
+            def _evaluate(AF):
+                AF = float(AF)
+                params_i = create_fit_params(t, float(np.max(r)))
+                seed_d = state["prev"] if state["prev"] is not None else lsq_vals
+                for pn, pv in seed_d.items():
+                    if pn in params_i and params_i[pn].vary and params_i[pn].expr is None and pn != "n_resp":
+                        params_i[pn].set(value=pv)
+                nr_target = AF / (1.0 - AF)
+                params_i["n_resp"].set(value=nr_target, vary=False)
+                try:
+                    res = lmfit.minimize(
+                        fit_function, params_i, method="least_squares",
+                        args=fit_args, kws={"sigma_noise": sigma_noise},
+                        x_scale="jac", max_nfev=2000, xtol=1e-5, ftol=1e-5,
+                    )
+                    p = res.params.valuesdict()
+                    row = {"scan_val": AF, "chisqr": res.chisqr}
+                    for pn in param_names:
+                        row[pn] = p.get(pn, float("nan"))
+                    row["r1"] = p.get("r0", float("nan")) + p.get("delta", float("nan"))
+                    bt = p.get("beta", float("nan"))
+                    row["alpha"] = AF * (1 - bt) if np.isfinite(bt) else float("nan")
+                    row["alpha_frac"] = AF
+                    row["Sigma"] = row["alpha"] + bt if np.isfinite(row["alpha"]) and np.isfinite(bt) else float("nan")
+                    state["prev"] = p
+                except Exception as e:
+                    row = {"scan_val": AF, "chisqr": float("nan")}
+                    for pn in param_names:
+                        row[pn] = float("nan")
+                    row["r1"] = float("nan")
+                    row["alpha"] = float("nan")
+                    row["alpha_frac"] = float("nan")
+                    row["Sigma"] = float("nan")
+                    print(f"  alpha_frac={AF:.4f}: failed ({e})")
+                return row
+
+            return _evaluate
+
+        rows_af = (
+            _adaptive_scan_direction(_alpha_frac_lsq, AF_lo, _make_evaluator_alpha_frac())
+            + _adaptive_scan_direction(_alpha_frac_lsq, AF_hi, _make_evaluator_alpha_frac())
+        )
+        lsq_row_af = {"scan_val": _alpha_frac_lsq, "chisqr": chi2_min_lsq}
+        for _pn in param_names:
+            lsq_row_af[_pn] = float(lsq_vals.get(_pn, float("nan")))
+        lsq_row_af["r1"] = float(lsq_vals.get("r0", float("nan"))) + float(lsq_vals.get("delta", float("nan")))
+        _beta_lsq_af = lsq_vals.get("beta", float("nan"))
+        lsq_row_af["alpha"] = (
+            _alpha_frac_lsq * (1 - _beta_lsq_af) if np.isfinite(_beta_lsq_af) else float("nan")
+        )
+        lsq_row_af["alpha_frac"] = _alpha_frac_lsq
+        lsq_row_af["Sigma"] = (
+            lsq_row_af["alpha"] + _beta_lsq_af if np.isfinite(lsq_row_af["alpha"]) and np.isfinite(_beta_lsq_af) else float("nan")
+        )
+        rows_af.append(lsq_row_af)
+        all_scans["alpha_frac"] = pd.DataFrame(sorted(rows_af, key=lambda r_: r_["scan_val"]))
+        print(f"  scanned {len(all_scans['alpha_frac'])} points; chi-square range: "
+              f"{all_scans['alpha_frac']['chisqr'].min():.4g} – {all_scans['alpha_frac']['chisqr'].max():.4g}")
+
     out_txt = fits_path / "profile_matrix_scans.txt"
     with open(out_txt, "w") as fh:
         for pn, df in all_scans.items():
@@ -2008,47 +2093,27 @@ def do_profile_likelihood_matrix(
         df_s = all_scans.get(pn)
         if df_s is None:
             continue
-        if pn == "n_resp":
-            # alpha_frac = n_resp/(n_resp+1) alone (no beta factor) -- since n_resp
-            # was fixed and everything else (including beta) re-optimized at each
-            # scan point, this n_resp profile IS the alpha_frac profile likelihood;
-            # no separate scan needed. (alpha itself now has its own rigorous
-            # scan, all_scans["alpha"], handled separately below -- see the
-            # comment there for why: alpha depends on both n_resp and beta,
-            # which are correlated, so it can't be read off this scan the way
-            # alpha_frac can.)
-            lo_nr, hi_nr, sl_nr, sh_nr = _find_ci_bounds(
-                df_s["scan_val"], df_s["chisqr"], log_x=_is_log_param(pn),
-                x_hard_min=ref_params["n_resp"].min, x_hard_max=ref_params["n_resp"].max,
-            )
-            def _nr_to_alpha_frac(v):
-                return v / (v + 1) if v is not None and np.isfinite(v) else None
-            lo_af = _nr_to_alpha_frac(lo_nr)
-            hi_af = _nr_to_alpha_frac(hi_nr)
-            ci_bounds["alpha_frac"] = (lo_af, hi_af)
-            sigma_bounds["alpha_frac"] = (_nr_to_alpha_frac(sl_nr), _nr_to_alpha_frac(sh_nr))
-            _nr_lsq_ci = lsq_vals.get("n_resp", float("nan"))
-            lv_af = _nr_lsq_ci / (_nr_lsq_ci + 1)
-            lo_af_str = f"{lo_af:.4g}" if lo_af is not None else "<scan_min"
-            hi_af_str = f"{hi_af:.4g}" if hi_af is not None else ">scan_max"
-            print(f"  {'alpha_frac':<10} {lv_af:>10.4g} {lo_af_str:>12} {hi_af_str:>12}")
-        else:
-            _p_obj = ref_params[pn]
-            _hard_lo = _p_obj.min if np.isfinite(_p_obj.min) else None
-            _hard_hi = _p_obj.max if np.isfinite(_p_obj.max) else None
-            lo, hi, sl, sh = _find_ci_bounds(
-                df_s["scan_val"], df_s["chisqr"], log_x=_is_log_param(pn),
-                x_hard_min=_hard_lo, x_hard_max=_hard_hi,
-            )
-            ci_bounds[pn] = (lo, hi)
-            sigma_bounds[pn] = (sl, sh)
-            _ps = float(field_interp[-1] - field_interp[0]) / 2.0 if pn == "shift" else 1.0
-            _disp_lo = lo * _ps if lo is not None else None
-            _disp_hi = hi * _ps if hi is not None else None
-            lo_str = f"{_disp_lo:.4g}" if _disp_lo is not None else "<scan_min"
-            hi_str = f"{_disp_hi:.4g}" if _disp_hi is not None else ">scan_max"
-            lv = lsq_vals.get(pn, float("nan")) * _ps
-            print(f"  {pn:<10} {lv:>10.4g} {lo_str:>12} {hi_str:>12}")
+        # n_resp itself has no direct physical meaning (it's the
+        # reparametrization trick that lets alpha_frac approach 1 without
+        # hitting a hard boundary) -- its own CI here is just for
+        # completeness/debugging. alpha_frac's actual CI comes from its own
+        # dedicated scan, all_scans["alpha_frac"], handled below.
+        _p_obj = ref_params[pn]
+        _hard_lo = _p_obj.min if np.isfinite(_p_obj.min) else None
+        _hard_hi = _p_obj.max if np.isfinite(_p_obj.max) else None
+        lo, hi, sl, sh = _find_ci_bounds(
+            df_s["scan_val"], df_s["chisqr"], log_x=_is_log_param(pn),
+            x_hard_min=_hard_lo, x_hard_max=_hard_hi,
+        )
+        ci_bounds[pn] = (lo, hi)
+        sigma_bounds[pn] = (sl, sh)
+        _ps = float(field_interp[-1] - field_interp[0]) / 2.0 if pn == "shift" else 1.0
+        _disp_lo = lo * _ps if lo is not None else None
+        _disp_hi = hi * _ps if hi is not None else None
+        lo_str = f"{_disp_lo:.4g}" if _disp_lo is not None else "<scan_min"
+        hi_str = f"{_disp_hi:.4g}" if _disp_hi is not None else ">scan_max"
+        lv = lsq_vals.get(pn, float("nan")) * _ps
+        print(f"  {pn:<10} {lv:>10.4g} {lo_str:>12} {hi_str:>12}")
     # r1 = r0 + delta, from its own rigorous scan (all_scans["r1"], built
     # above) -- not a conversion of the delta scan.
     if "r1" in all_scans:
@@ -2092,6 +2157,21 @@ def do_profile_likelihood_matrix(
         lo_str = f"{lo:.4g}" if lo is not None else "<scan_min"
         hi_str = f"{hi:.4g}" if hi is not None else ">scan_max"
         print(f"  {'alpha':<10} {_alpha_lsq_ci:>10.4g} {lo_str:>12} {hi_str:>12}")
+
+    # alpha_frac = n_resp/(n_resp+1), from its own rigorous scan
+    # (all_scans["alpha_frac"], built above) -- not a conversion of the
+    # generic n_resp scan.
+    if "alpha_frac" in all_scans:
+        df_AF = all_scans["alpha_frac"]
+        # alpha_frac is also a fraction, physically bounded in [0, 1].
+        lo, hi, sl, sh = _find_ci_bounds(df_AF["scan_val"], df_AF["chisqr"], log_x=False, x_hard_min=0.0, x_hard_max=1.0)
+        ci_bounds["alpha_frac"] = (lo, hi)
+        sigma_bounds["alpha_frac"] = (sl, sh)
+        _nr_lsq_af_ci = lsq_vals.get("n_resp", float("nan"))
+        _alpha_frac_lsq_ci = _nr_lsq_af_ci / (_nr_lsq_af_ci + 1) if np.isfinite(_nr_lsq_af_ci) else float("nan")
+        lo_str = f"{lo:.4g}" if lo is not None else "<scan_min"
+        hi_str = f"{hi:.4g}" if hi is not None else ">scan_max"
+        print(f"  {'alpha_frac':<10} {_alpha_frac_lsq_ci:>10.4g} {lo_str:>12} {hi_str:>12}")
 
     # save CI table
     _nr_lsq = lsq_vals.get("n_resp", float("nan"))
@@ -2151,16 +2231,15 @@ def do_profile_likelihood_matrix(
                 ax.set_visible(False)
                 continue
 
-            # helpers: alpha_frac is displayed but n_resp is the actual scan key
-            # (alpha_frac depends on n_resp alone, so no separate scan is
-            # needed); alpha and Sigma each have their own real rigorous scan
-            # (all_scans["alpha"], all_scans["Sigma"]) now, so they're treated
-            # like any other directly-scanned quantity below.
+            # helpers: alpha, alpha_frac, Sigma, and r1 each have their own
+            # real rigorous scan now (all_scans["alpha"], all_scans["alpha_frac"],
+            # etc.), so they're all treated like any other directly-scanned
+            # quantity below -- no special-casing needed.
             def _scan_key(pname):
-                return "n_resp" if pname == "alpha_frac" else pname
+                return pname
 
             def _scan_x_col(pname):
-                return pname if pname == "alpha_frac" else "scan_val"
+                return "scan_val"
 
             def _covar_col(pname):
                 return pname
