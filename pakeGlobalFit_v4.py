@@ -2952,7 +2952,7 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
         ax_res.set_xlabel("Time (s)")
         ax_res.set_ylabel("Field (G)")
         cbar = fig_res.colorbar(map_res, ax=ax_res)
-        cbar.set_label("Noise (data − field smooth, arb. u)", rotation=270, labelpad=15)
+        cbar.set_label("Amplitude (arb. u)", rotation=270, labelpad=15)
         fig_res.savefig(fits_path.joinpath("noise_after_smoothing.png"), dpi=1200)
         plt.close(fig_res)
 

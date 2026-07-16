@@ -17,7 +17,7 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
 
-N414Q = True
+N414Q = False
 SKIP_TO_EMCEE = False  # set True to skip basinhopping+lsq and go straight to emcee
 RUN_EMCEE = False       # set False to skip emcee and plot using saved LSQ params
 LONG_EMCEE = False      # set True to run a long emcee run (default is short test values)
@@ -25,8 +25,8 @@ REPLOT_FROM_COMPARISON = False  # set True to skip all fitting and regenerate pl
 PROFILE_TAU = False  # set True to run profile likelihood scan over alpha_frac and delta
 REPLOT_TAU_PRIOR = False  # set True to regenerate the tau_prior CI/L-curve plots from the
 # saved profile_likelihood_tau_prior.txt instead of re-running the (expensive) scan
-RUN_PROFILE_MATRIX = True   # set True to run profile likelihood matrix / corner plot
-REPLOT_PROFILE_MATRIX = False  # set True to regenerate plots/CI from saved profile_matrix_scans.txt (no re-scan)
+RUN_PROFILE_MATRIX = False   # set True to run profile likelihood matrix / corner plot
+REPLOT_PROFILE_MATRIX = True  # set True to regenerate plots/CI from saved profile_matrix_scans.txt (no re-scan)
 RESCAN_ONLY = None  # TEMPORARY DEBUGGING AID: set to a list like ["n_resp"] to
 # freshly re-scan just those entries (loading everything else from the saved
 # profile_matrix_scans.txt) instead of a full re-scan -- for fast iteration
@@ -3420,7 +3420,7 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
         ax_res.set_xlabel("Time (s)")
         ax_res.set_ylabel("Field (G)")
         cbar = fig_res.colorbar(map_res, ax=ax_res)
-        cbar.set_label("Noise (data − field smooth, arb. u)", rotation=270, labelpad=15)
+        cbar.set_label("Amplitude (arb. u)", rotation=270, labelpad=15)
         fig_res.savefig(fits_path.joinpath("noise_after_smoothing.png"), dpi=1200)
         plt.close(fig_res)
 
