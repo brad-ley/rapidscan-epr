@@ -26,15 +26,16 @@ outputs/             pre-computed figures and fit results, as published
   WT/fits/            WT distance-distribution fit (figures + LSQ results)
   N414Q/fits/         N414Q distance-distribution fit (figures + LSQ results)
   SVD_buffer/         SVD decomposition figures
-  (kernels/, and other script outputs, are created here when scripts are re-run)
+  kernels/            dipolar kernel consumed by pakeGlobalFit_v3.py/v4.py
+  (other script outputs are created here when scripts are re-run)
 ```
 
 `outputs/` as provided is the pre-computed, published result of running the
-scripts below — you don't need to re-run anything to inspect the figures or
-fit numbers. Re-running a script writes into the same `outputs/` tree
-without overwriting the provided files (scripts create their own
-subfolders, e.g. `outputs/kernels/`, or write next to their raw-data input
-under `data/raw_epr/.../fits/`).
+scripts below, including the dipolar kernel — you don't need to re-run
+anything to inspect the figures, fit numbers, or fit the data yourself.
+Re-running a script writes into the same `outputs/` tree without
+overwriting the provided files (scripts create their own subfolders, or
+write next to their raw-data input under `data/raw_epr/.../fits/`).
 
 ## Scripts
 
@@ -56,9 +57,10 @@ confidence intervals.
 - Toggle `N414Q = True/False` near the top of the file to switch between
   the two protein variants reported in the manuscript. Raw data for both
   variants is bundled under `data/raw_epr/WT/` and `data/raw_epr/N414Q/`.
-- Before the first run, generate the dipolar kernel with
-  `python dipolar_kernel_ft.py` (see below) — both scripts expect it at
-  `outputs/kernels/ft-kernel_30mT_13ns_tcorr.txt`.
+- Both scripts expect the dipolar kernel at
+  `outputs/kernels/ft-kernel_30mT_13ns_tcorr.txt`, which is bundled — no
+  need to generate it before running. Re-running `dipolar_kernel_ft.py`
+  (see below) is optional and will reproduce the same file.
 - The published fit results (figures + `fit_output.txt` / `profile_ci_bounds.txt`
   etc.) are provided pre-computed in `outputs/WT/fits/` and
   `outputs/N414Q/fits/`. Each contains a top-level set of profile-likelihood
@@ -75,22 +77,24 @@ confidence intervals.
 
 ### `dipolar_kernel_ft.py`
 Builds the dipolar-broadening kernel (Kubo-Anderson correlation function FT)
-consumed by `pakeGlobalFit_v3.py`/`v4.py`. Run standalone to regenerate the
-kernel file (`python dipolar_kernel_ft.py`). Output goes to
-`outputs/kernels/` by default, or pass an output directory as a
-command-line argument. Not bundled directly because it is a large,
-fully deterministic derived file — regenerating it is faster and more
-transparent than shipping it.
+consumed by `pakeGlobalFit_v3.py`/`v4.py`. The generated kernel is already
+bundled at `outputs/kernels/ft-kernel_30mT_13ns_tcorr.txt`, so running this
+script is **not required** to use `pakeGlobalFit_v3.py`/`v4.py` — it's
+included in case you want to regenerate the kernel yourself (e.g. to
+confirm reproducibility, or to build a kernel at different parameters).
+Run `python dipolar_kernel_ft.py` to do so; output goes to
+`outputs/kernels/` by default (overwriting the bundled file with an
+identical one), or pass an output directory as a command-line argument.
 
 **Note on field-grid resolution:** the kernel used for the published fits
 was generated at 0.001 mT field spacing (a ~193 MB file). This script's
-default is 0.01 mT (~19 MB, same filename/r-range/tau_c) — a 10x smaller
-file with no effect on the fit result, since `pakeGlobalFit_v3.py`/`v4.py`
-interpolate the kernel down onto a ~1024-point field grid (~0.03 mT
-effective spacing) immediately after loading it, well before any
-convolution or optimization happens. Both versions were verified to load
-and fit identically; 0.01 mT was chosen for this archive purely to keep
-the package size down.
+default, and the version bundled here, is 0.01 mT (~19 MB, same
+filename/r-range/tau_c) — a 10x smaller file with no effect on the fit
+result, since `pakeGlobalFit_v3.py`/`v4.py` interpolate the kernel down
+onto a ~1024-point field grid (~0.03 mT effective spacing) immediately
+after loading it, well before any convolution or optimization happens.
+Both versions were verified to load and fit identically; 0.01 mT was
+chosen for this archive purely to keep the package size down.
 
 ### `fit_distribution_gaussian.py`
 Fits Gaussians to the MD-derived P(r) distributions (1 bar / 3 kbar, with
