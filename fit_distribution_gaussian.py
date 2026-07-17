@@ -8,21 +8,17 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
 
-CSV_PATH = Path(
+DATA_DIR = Path(
     "/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com"
-    "/My Drive/Research/Manuscripts/2025-distances/tip4p/stride_1"
-    "/gtn_sample_5000/combined_output"
-    "/GTN_sample_5000_trajectory_distributions.csv"
+    "/My Drive/Research/Manuscripts/2025-distances/tip4p/better ci's"
 )
+
+CSV_PATH = DATA_DIR / "GTN_sample_5000_trajectory_distributions.csv"
 
 # Raw MD residue-residue distances, without the attached spin labels --
 # the two spin labels add roughly a nm of linker length each, so this
 # distribution sits well below the label-to-label one above.
-CSV_PATH_NOLABEL = Path(
-    "/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com"
-    "/My Drive/Research/Manuscripts/2025-distances/tip4p"
-    "/MD_trajectory_distributions_no_label.csv"
-)
+CSV_PATH_NOLABEL = DATA_DIR / "MD_trajectory_distributions.csv"
 
 # main.tex pulls the figure from here via \includegraphics{figures/...} --
 # the script's own combined_output/ save location isn't on that path, so
@@ -218,10 +214,14 @@ def main():
     # Copy to every other place this figure needs to live: the manuscript's
     # own figures/ folder (what main.tex actually \includegraphics's) and
     # alongside the no-label fit results, so both output .txt files have the
-    # figure that was generated from them sitting right next to them.
+    # figure that was generated from them sitting right next to them. Skip
+    # any destination that's already where the figure was just saved (e.g.
+    # when CSV_PATH and CSV_PATH_NOLABEL share a folder).
     for dest_dir in (FIGURES_DIR, CSV_PATH_NOLABEL.parent):
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest_path = dest_dir / png_name
+        if dest_path.resolve() == png_path.resolve():
+            continue
         shutil.copyfile(png_path, dest_path)
         print(f"Copied to: {dest_path}")
 
