@@ -76,7 +76,7 @@ confidence intervals.
   script that produces the composite directly.
 
 ### `dipolar_kernel_ft.py`
-Builds the dipolar-broadening kernel (Kubo-Anderson correlation function FT)
+Builds the dipolar-broadening kernel (Abragam Gaussian-Lorentzian bridging correlation function FT)
 consumed by `pakeGlobalFit_v3.py`/`v4.py`. The generated kernel is already
 bundled at `outputs/kernels/ft-kernel_30mT_13ns_tcorr.txt`, so running this
 script is **not required** to use `pakeGlobalFit_v3.py`/`v4.py` — it's
@@ -129,12 +129,3 @@ GTN spin labels attached (via `chilife`). Reads `data/rg_analysis/`
 (bundled). Reports one pressure condition per run — edit `pdb_file` near
 the top to switch between `JS_1bar_equib.pdb` (1 bar) and
 `JS_3kbar_equib.pdb` (3 kbar), then re-run. Output written to `outputs/`.
-
-## Figures not produced by any script in this package
-
-A few manuscript figures were generated outside this code package:
-
-- `lov2_final_render.png` — molecular structure rendering (external
-  visualization tool, e.g. PyMOL/ChimeraX), not a Python script.
-- `md_3kbar.png` — manually clipped/cropped from another figure, not
-  generated programmatically.
