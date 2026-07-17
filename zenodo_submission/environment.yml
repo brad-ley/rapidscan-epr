@@ -1,0 +1,20 @@
+name: tigger-distances
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib
+  - lmfit
+  - scienceplots
+  - pyarrow
+  - tqdm
+  - pyqt
+  - pyqtgraph
+  - MDAnalysis
+  - pip
+  - pip:
+      - pybroom
+      - chilife

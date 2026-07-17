@@ -36,10 +36,9 @@ MU0 = 4.0 * np.pi * 1e-7        # H/m
 MUB = 9.2740100783e-24          # J/T
 HBAR = 1.054571817e-34          # J*s
 
-BASEPATH = (
-    "/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/"
-    "My Drive/Research/Code/dipolar averaging"
-)
+# Output kernel files (.txt) are written here by default; override with a
+# command-line argument, e.g. `python dipolar_kernel_ft.py /path/to/out`.
+BASEPATH = Path(__file__).parent.parent / "outputs" / "kernels"
 
 
 def decay_time(omega, tau_c, exponent_thresh=9.2):
@@ -148,13 +147,17 @@ if __name__ == "__main__":
 
 
 def main(out_dir):
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
     n_r = 256
     r = np.linspace(1.0, 7.0, n_r)  # nm
     tau_c = 13.0e-9  # s
-    # 0.01 mT is still finer than the ~0.03 mT effective resolution
-    # pakeGlobalFit_v3.py/v4.py interpolate the kernel down to right after
-    # loading it (n_field ~1024 over the ~30 mT span), so this has no
-    # effect on the fit result -- just a 10x smaller file than 0.001 mT.
+    # The production kernel used for the published fits was generated at
+    # 0.001 mT spacing (a 192 MB file). This has no effect on the fit
+    # result: pakeGlobalFit_v3.py/v4.py interpolate the kernel down onto a
+    # ~1024-point field grid (~0.03 mT spacing) immediately after loading
+    # it, well before any convolution/optimization happens. 0.01 mT here
+    # is still finer than that effective resolution, so it reproduces the
+    # same fit at ~1/10th the file size.
     b = np.arange(-15.0, 15.0 + 1e-9, 0.01)  # mT
 
     g = 1.992

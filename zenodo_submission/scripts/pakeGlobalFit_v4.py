@@ -96,7 +96,7 @@ from scipy.ndimage import gaussian_filter1d
 N414Q = False
 
 # --- profile-likelihood / confidence-interval flags -------------------------
-RUN_PROFILE_MATRIX = False
+RUN_PROFILE_MATRIX = True
 # The main analysis you'll want after an initial fit: scans every free
 # parameter (and the alpha_frac, Sigma=alpha+beta derived quantities) one at
 # a time, re-optimizing everything else at each scan point, and turns the
@@ -142,7 +142,7 @@ REDUCE_COMPUTATION_SPEEDUP = False
 # for production numbers -- outputs go to a separate fits/*_fast subfolder
 # so a fast test run can never silently overwrite a real result.
 
-REFINE_FROM_SEED = True
+REFINE_FROM_SEED = False
 # Skip the (slow) basinhopping global search and instead seed the local
 # least-squares refinement directly from the currently-saved
 # fits/.fit_params_lsq.repr. Useful after a profile-likelihood scan reports
@@ -3134,22 +3134,25 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
 # does; this block just wires them together.
 
 if __name__ == "__main__":
-    basepath = "/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/"
+    # Raw EPR time-domain data (.feather), bundled under data/raw_epr/.
+    basepath = str(Path(__file__).parent.parent / "data" / "raw_epr")
     try:
         broadened_f = sys.argv[1]
     except IndexError:
         broadened_f = Path(basepath).joinpath(
-            "Data/2024/11/7 N414Q/293.2 K/106mA_24kHz_pre30s_on15s_off600s_25000avgs_filtered_batchDecon.feather"
+            "N414Q/106mA_24kHz_pre30s_on15s_off600s_25000avgs_filtered_batchDecon.feather"
             if N414Q else
-            "Data/2023/5/WT FMN (30, 31 May 23)/31/FMN sample/stable copy/291.3/M01_293.1K_100mA_stable_pre30s_on10s_off470s_25000avgs_filtered_batchDecon.feather",
+            "WT/M01_293.1K_100mA_stable_pre30s_on10s_off470s_25000avgs_filtered_batchDecon.feather",
         )
     intrinsic_f = Path(basepath).joinpath(
-        "Data/2024/7/29/293 K/100mA_23.5kHz_pre30s_on10s_off230s_25000avgs_filtered_batchDecon.feather",
+        "intrinsic_linewidth/100mA_23.5kHz_pre30s_on10s_off230s_25000avgs_filtered_batchDecon.feather",
     )
     # Kubo-Anderson FT kernel (accounts for motional narrowing) -- see
     # dipolar_kernel_ft.py for how this file is generated.
-    pake_patterns = Path(basepath).joinpath(
-        "Code/dipolar averaging/ft-kernel_30mT_13ns_tcorr.txt"
+    # Run dipolar_kernel_ft.py first to generate this file (same default
+    # parameters reproduce this exact filename/kernel).
+    pake_patterns = Path(basepath).parent.parent.joinpath(
+        "outputs/kernels/ft-kernel_30mT_13ns_tcorr.txt"
     )
 
     # Speedup kwargs applied to basinhopping/LSQ/profile scans when
