@@ -70,7 +70,9 @@
       "Bash(mkdir -p /tmp/dipolar_test2)",
       "Read(//tmp/**)",
       "Bash(rm -rf /tmp/dipolar_test2)",
-      "Bash(python3 -m py_compile pakeGlobalFit_v3.py)"
+      "Bash(python3 -m py_compile pakeGlobalFit_v3.py)",
+      "Bash(grep -n \"katoAsymmetric\" \"/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Manuscripts/2025-distances/supplementary.tex\")",
+      "Read(//Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Manuscripts/2025-distances/**)"
     ],
     "additionalDirectories": [
       "/private/tmp/dipolar_test",

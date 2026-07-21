@@ -84,6 +84,8 @@ import numpy as np
 import pandas as pd
 from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
+from scipy.optimize import brentq
+from scipy.stats import norm
 
 # =============================================================================
 # User-configurable flags
@@ -141,6 +143,20 @@ REDUCE_COMPUTATION_SPEEDUP = False
 # useful for testing changes to this script itself, but not accurate enough
 # for production numbers -- outputs go to a separate fits/*_fast subfolder
 # so a fast test run can never silently overwrite a real result.
+
+PLOT_CI_BANDS = True
+# Shade each P(r) curve's own 95% Monte Carlo confidence band (in that
+# curve's time-color) in a separate gaussian_fits_ci.png, treated as
+# +-1.96*sigma (the exact 95% z-score) of an asymmetric ("split normal")
+# Gaussian per parameter -- see _build_mc_param_samples / _double_gaussian_mc
+# above double_gaussian(). Bands are read from a profile_ci_bounds.txt
+# (param/lsq/ci_low/ci_high table produced by RUN_PROFILE_MATRIX) found next
+# to whichever broadened_f the __main__ block below picks for the current
+# N414Q setting -- fits/<OUTPUT_TAG>/profile_ci_bounds.txt if OUTPUT_TAG is
+# set, else fits/profile_ci_bounds.txt.
+# Like REPLOT_PROFILE_MATRIX, this is a replot-only flag: it's included in
+# _skip_fitting below, so setting it alone loads the already-saved LSQ
+# result (fits/.fit_params_lsq.repr) instead of running a new fit.
 
 REFINE_FROM_SEED = False
 # Skip the (slow) basinhopping global search and instead seed the local
@@ -355,20 +371,30 @@ def alpha_heaviside_tau(beta, alpha, ti, t_on, t_off, tau_1, tau_2):
     itself. That's the middle term: (1 - exp(-(t_off-t_on)/tau_1)) is the
     fraction of the way to saturation actually reached by t_off.
     """
+    # Exponent arguments are clipped to +-700 before exp() -- a no-op for
+    # any physically sensible tau_1/tau_2 (this only ever bites for the
+    # extreme tail of Monte Carlo-sampled parameters in
+    # _build_mc_param_samples/_double_gaussian_mc, where a near-zero tau
+    # would otherwise overflow exp() to inf, then hit the *(1-exp(...))
+    # or *heaviside(...) mask as an unmasked-looking 0*inf -> NaN, silently
+    # corrupting that whole MC draw instead of just being masked out).
+    _e1 = np.exp(-np.clip((ti - t_on) / tau_1, -700, 700))
+    _e2 = np.exp(-np.clip((t_off - t_on) / tau_1, -700, 700))
+    _e3 = np.exp(-np.clip((ti - t_off) / tau_2, -700, 700))
     return (
         beta
         + alpha
         * (
             np.heaviside(ti - t_on, 1)
             * np.heaviside(t_off - ti, 0)
-            * (1 - np.exp(-(ti - t_on) / tau_1))
+            * (1 - _e1)
             + (
-                1 - np.exp(-(t_off - t_on) / tau_1)
+                1 - _e2
             )  # fraction of unfolding actually reached by t_off (may be < 1
                # if tau_1 is slow relative to the illumination window) --
                # recovery starts from *that* level, not from full saturation
             * np.heaviside(ti - t_off, 1)
-            * np.exp(-(ti - t_off) / tau_2)
+            * _e3
         )
     )
 
@@ -376,6 +402,323 @@ def alpha_heaviside_tau(beta, alpha, ti, t_on, t_off, tau_1, tau_2):
 def normalized_gaussian(x, sigma, mu):
     """Standard normalized 1D Gaussian, area = 1."""
     return 1 / np.sqrt(2 * np.pi * sigma**2) * np.exp(-((x - mu) ** 2) / (2 * sigma**2))
+
+
+# --- asymmetric-Gaussian CI bands for gaussian_fits.png (PLOT_CI_BANDS) -----
+# Two-piece ("split") normal: std sigma above the mode, r*sigma below it,
+# continuous and normalized at the mode (area = 1):
+#
+#   A(z; mu, sigma, r) = 2 / (sqrt(2*pi) * sigma * (r + 1))
+#                         * exp(-(z-mu)^2 / (2*sigma^2))            if z > mu
+#                         * exp(-(z-mu)^2 / (2*r^2*sigma^2))        otherwise
+#
+# sigma/r are solved from a parameter's (lsq, ci_low, ci_high) row so that
+# ci_low/ci_high are EXACTLY the 2.5th/97.5th percentiles of the resulting
+# mixture -- not just "1.96*sigma_eff on each side" (that simpler version is
+# only exact when r=1; for r != 1 the p_lower=r/(1+r) mixture weight below
+# shifts each branch's own tail probability away from the naive 0.025, so a
+# fixed z-score under- or over-shoots depending on how skewed the CI is --
+# see the module's git history for the derivation/verification). Solving
+# both percentile equations simultaneously has no closed form in r, so this
+# root-finds it:
+#   ci_high = lsq + sigma * z_hi(r),      z_hi(r) = Phi^-1(1 - 0.0125*(1+r))
+#   ci_low  = lsq - r*sigma * z_lo(r),    z_lo(r) = Phi^-1(1 - 0.0125*(1+r)/r)
+# (both reduce to the familiar z_hi=z_lo=1.96 when r=1, i.e. a symmetric CI).
+_MC_PARAM_NAMES = ("A", "tau_1", "tau_2", "beta", "alpha", "r0", "w0", "r1", "w1")
+# Params that are physically required to stay positive (widths, timescales,
+# amplitude). Floored at a tiny epsilon -- NOT at ci_low, unlike the old
+# (removed) clip -- so this only ever touches the unphysical (<0) sliver of
+# the extreme tail, far out past the reported 95% CI, and has no effect on
+# the 2.5th/97.5th percentiles callers actually read off the MC band.
+_MC_POSITIVE_PARAMS = ("A", "tau_1", "tau_2", "w0", "w1")
+_MC_POSITIVE_FLOOR = 1e-6
+
+
+def _ci_to_split_normal(lsq, ci_low, ci_high):
+    """Solve (sigma, r) for the two-piece normal above from a 95%-CI row,
+    such that A(z; lsq, sigma, r)'s own 2.5th/97.5th percentiles exactly
+    equal ci_low/ci_high (verified against direct Monte Carlo sampling)."""
+    def _sigma_from_r(r):
+        return (ci_high - lsq) / norm.ppf(1 - 0.0125 * (1 + r))
+
+    def _resid(r):
+        sigma = _sigma_from_r(r)
+        return lsq - r * sigma * norm.ppf(1 - 0.0125 * (1 + r) / r) - ci_low
+
+    # Valid domain for r (both Phi^-1 arguments must be in (0, 1)):
+    # 0.0125*(1+r)/r < 1  =>  r > 0.0125/0.9875,  and 0.0125*(1+r) < 1 => r < 79.
+    r_grid = np.geomspace(0.0127, 78.0, 400)
+    resid_grid = np.array([_resid(rv) for rv in r_grid])
+    (_sign_change,) = np.where(np.diff(np.sign(resid_grid)) != 0)
+    i = _sign_change[0]
+    r = brentq(_resid, r_grid[i], r_grid[i + 1], xtol=1e-12)
+    sigma = _sigma_from_r(r)
+    return sigma, r
+
+
+def _sample_split_normal(mu, sigma, r, size, rng):
+    """Draw `size` samples from the two-piece normal A(z; mu, sigma, r)."""
+    if sigma <= 0:
+        return np.full(size, mu)
+    p_lower = r / (1.0 + r)
+    is_lower = rng.random(size) < p_lower
+    z = np.empty(size)
+    n_lower = int(is_lower.sum())
+    z[is_lower] = mu - np.abs(rng.normal(0.0, r * sigma, size=n_lower))
+    z[~is_lower] = mu + np.abs(rng.normal(0.0, sigma, size=size - n_lower))
+    return z
+
+
+def _build_mc_param_samples(res_params, ci_bounds_file, n_samples=10000, seed=0):
+    """Monte Carlo sample _MC_PARAM_NAMES from the asymmetric-Gaussian CI
+    model above, reading (param, lsq, ci_low, ci_high) rows from
+    ci_bounds_file (a profile_ci_bounds.txt). Params missing a usable CI row
+    fall back to a fixed draw at their current res_params value.
+
+    Draws are NOT clipped to [ci_low, ci_high] -- the split-normal's tails
+    are real, unbounded, and were exactly calibrated (see
+    _ci_to_split_normal) so ci_low/ci_high land at its true 2.5th/97.5th
+    percentiles; clipping there would silently discard the ~2.5% beyond each
+    bound that's supposed to be there, understating the propagated P(r,t)
+    CI band. (An earlier version clipped here to dodge exp() overflow for
+    extreme tau_1/tau_2 draws -- that's now handled at the actual source in
+    alpha_heaviside_tau instead, so it's no longer needed here.)
+    """
+    rng = np.random.default_rng(seed)
+    ci_table = pd.read_csv(ci_bounds_file, sep=r"\s+", index_col="param")
+    mc_params = {}
+    for pname in _MC_PARAM_NAMES:
+        row = ci_table.loc[pname] if pname in ci_table.index else None
+        if row is not None and np.isfinite(row["ci_low"]) and np.isfinite(row["ci_high"]):
+            sigma, r = _ci_to_split_normal(row["lsq"], row["ci_low"], row["ci_high"])
+            mc_params[pname] = _sample_split_normal(row["lsq"], sigma, r, n_samples, rng)
+        else:
+            mc_params[pname] = np.full(n_samples, res_params[pname])
+        if pname in _MC_POSITIVE_PARAMS:
+            np.clip(mc_params[pname], _MC_POSITIVE_FLOOR, None, out=mc_params[pname])
+    mc_params["t_on"] = res_params["t_on"]
+    mc_params["t_off"] = res_params["t_off"]
+    return mc_params
+
+
+def _double_gaussian_mc(x, params_mc, ti):
+    """Batched double_gaussian: params_mc values are arrays of shape
+    (N_samples,) (t_on/t_off may stay scalar). Returns (len(x), N_samples)
+    for a single scalar ti, used to build the Monte Carlo CI envelope."""
+    x0 = params_mc["r0"][np.newaxis, :]
+    w0 = params_mc["w0"][np.newaxis, :]
+    x1 = params_mc["r1"][np.newaxis, :]
+    w1 = params_mc["w1"][np.newaxis, :]
+    A = params_mc["A"][np.newaxis, :]
+    alpha_func = alpha_heaviside_tau(
+        params_mc["beta"], params_mc["alpha"], ti,
+        params_mc["t_on"], params_mc["t_off"], params_mc["tau_1"], params_mc["tau_2"],
+    )[np.newaxis, :]
+    xr = x[:, np.newaxis]
+    val0 = normalized_gaussian(xr, w0, x0)
+    val1 = normalized_gaussian(xr, w1, x1)
+    return A * ((1 - alpha_func) * val0 + alpha_func * val1)
+
+
+def _split_normal_pdf(z, mu, sigma, r):
+    """Evaluate the asymmetric-Gaussian PDF A(z; mu, sigma, r) (see the
+    module note above _ci_to_split_normal) on an array of z values."""
+    z = np.asarray(z, dtype=float)
+    amp = 2.0 / (np.sqrt(2 * np.pi) * sigma * (r + 1.0))
+    return np.where(
+        z > mu,
+        amp * np.exp(-((z - mu) ** 2) / (2 * sigma**2)),
+        amp * np.exp(-((z - mu) ** 2) / (2 * r**2 * sigma**2)),
+    )
+
+
+_MC_LABELS = {
+    "A": r"$A$", "tau_1": r"$\tau_1$ (s)", "tau_2": r"$\tau_2$ (s)",
+    "beta": r"$\beta$", "alpha": r"$\alpha$",
+    "r0": r"$r_\mathrm{D}$ (nm)", "w0": r"$\sigma_\mathrm{D}$ (nm)",
+    "r1": r"$r_\mathrm{L}$ (nm)", "w1": r"$\sigma_\mathrm{L}$ (nm)",
+}
+
+
+def plot_param_ci_skew(param_name, ci_bounds_file, fits_path):
+    """Diagnostic plot of the asymmetric-Gaussian uncertainty model fit to
+    one parameter's CI row: the analytic PDF A(z; mu, sigma, r), shaded over
+    its central 95% (== the reported [ci_low, ci_high] by construction),
+    with the LSQ value marked. Saves <param_name>_ci_skew.png and returns
+    (sigma, r) so callers can report/log the skew.
+    """
+    ci_table = pd.read_csv(ci_bounds_file, sep=r"\s+", index_col="param")
+    row = ci_table.loc[param_name]
+    mu, ci_low, ci_high = float(row["lsq"]), float(row["ci_low"]), float(row["ci_high"])
+    sigma, r = _ci_to_split_normal(mu, ci_low, ci_high)
+
+    lower_std = r * sigma
+    z = np.linspace(mu - 4 * lower_std, mu + 4 * sigma, 2000)
+    pdf = _split_normal_pdf(z, mu, sigma, r)
+
+    fig, ax = plt.subplots(figsize=(4, 3))
+    ax.plot(z, pdf, color="C0", lw=1.5)
+    _in_ci = (z >= ci_low) & (z <= ci_high)
+    ax.fill_between(z[_in_ci], pdf[_in_ci], color="C0", alpha=0.3, label="95% CI")
+    ax.axvline(mu, color="k", ls="--", lw=1, label="LSQ")
+    ax.axvline(ci_low, color="gray", ls=":", lw=1)
+    ax.axvline(ci_high, color="gray", ls=":", lw=1)
+    ax.set_xlabel(_MC_LABELS.get(param_name, param_name))
+    ax.set_ylabel("Probability density")
+    ax.legend(handlelength=1, labelspacing=0.25)
+    ax.text(
+        0.02, 0.97,
+        f"$\\sigma$={sigma:.3g}\n$r$={r:.3g} ({'wider' if r > 1 else 'narrower'} below LSQ)",
+        transform=ax.transAxes, va="top", fontsize=8,
+    )
+    fig.tight_layout()
+    out_png = fits_path / f"{param_name}_ci_skew.png"
+    fig.savefig(out_png, dpi=600)
+    plt.close(fig)
+    print(f"  saved {out_png.name}")
+    return sigma, r
+
+
+def plot_waterfall_3d(
+    res_params, r, t, times, fits_path, plot_ci_bands=False, mc_params=None,
+    azim=-60, elev=22, out_suffix="", qualitative=False,
+):
+    """Classic pseudo-3D "stacked spectra" waterfall of P(r, t) (the NMR/IR
+    style, distinct from the 2D offset-lane waterfall in plot_and_save):
+    each time slice is an outline curve at its own y=ti plane in a real 3D
+    axis (no fill down to zero -- kept sparse/uncluttered on purpose), so,
+    unlike the 2D version, per-curve CI shading never bleeds into a
+    neighboring curve's lane.
+
+    Saves gaussian_fits_3d<out_suffix>.png: uncolored (uniform black) lines,
+    time conveyed purely by the y-axis/stacking position.
+
+    If plot_ci_bands, also saves gaussian_fits_3d_ci<out_suffix>.png with
+    each curve's own translucent 95% Monte Carlo CI cloud layered around
+    its line (mc_params from _build_mc_param_samples) -- this variant uses
+    the same viridis time-coloring on both the line and its cloud so a
+    given band is unambiguously tied to its own curve, which a uniform
+    color can't convey once multiple curves/bands overlap in a single 3D
+    view.
+
+    azim/elev set the camera angle (matplotlib's view_init) -- e.g. call a
+    second time with a different azim (see plot_and_save's "_lowr" call) to
+    get the same data viewed from the opposite end of the distance axis,
+    saved under out_suffix so it doesn't overwrite the first view.
+
+    qualitative=True swaps the continuous winter colormap for tab10's 10
+    discrete, maximally-distinct colors (still assigned by the curve's own
+    fixed time-index, so a given curve/band keeps the same color across
+    views) -- a test of whether categorically distinct colors make it
+    easier to trace a band back to its line than adjacent shades of a
+    continuous gradient do.
+    """
+    from mpl_toolkits.mplot3d.art3d import PolyCollection
+
+    if qualitative:
+        _tab10 = plt.get_cmap("tab10").colors
+        cmap = lambda frac, _n=len(times): _tab10[round(frac * (_n - 1)) % len(_tab10)]  # noqa: E731
+    else:
+        cmap = plt.get_cmap("winter")  # blue->green, both ends fully saturated (unlike viridis's pale yellow tail)
+    # Draw furthest-from-camera (largest ti, given the view angle below)
+    # first and nearest (ti=0) last, so nearer curves layer on top of
+    # farther ones for anything that does overlap (e.g. CI clouds).
+    order = sorted(range(len(times)), key=lambda i: times[i], reverse=True)
+
+    for with_ci in ((False, True) if plot_ci_bands else (False,)):
+        fig = plt.figure(figsize=(5, 4))
+        ax = fig.add_subplot(111, projection="3d")
+        # mplot3d's default per-artist auto depth-sorting ("computed_zorder")
+        # doesn't reliably agree between Line3D and Poly3DCollection objects,
+        # so a CI band that's actually nearer the camera than some other
+        # curve's line can still render behind it. Disable the auto-guess
+        # and assign zorder explicitly instead, matching the draw order
+        # below (which already goes farthest-camera first).
+        ax.computed_zorder = False
+        zmax = 0.0
+        for pos, ind in enumerate(order):
+            ti = times[ind]
+            color = cmap(ind / (len(times) - 1)) if with_ci else "black"
+            curve = double_gaussian(r, res_params, ti)
+            zmax = max(zmax, float(curve.max()))
+            _zorder = 10 * pos
+            if with_ci:
+                mc_curves = _double_gaussian_mc(r, mc_params, ti)
+                lo, hi = np.percentile(mc_curves, [2.5, 97.5], axis=1)
+                ci_verts = [list(zip(r, hi)) + list(zip(r[::-1], lo[::-1]))]
+                ax.add_collection3d(
+                    PolyCollection(ci_verts, facecolors=[color], alpha=0.3, edgecolors="none", zorder=_zorder),
+                    zs=ti, zdir="y",
+                )
+                zmax = max(zmax, float(hi.max()))
+            ax.plot(r, [ti] * len(r), curve, color=color, lw=0.8, zorder=_zorder + 1)
+
+        ax.set_xlabel("Distance $r$ (nm)")
+        ax.set_ylabel("Time (s)")
+        # mplot3d auto-rotates the z-label to face the camera by default,
+        # which for this view angle comes out nearly horizontal -- unlike
+        # the standard 2D convention of a vertical, bottom-to-top label.
+        # Disable that and fix it to the conventional 90 degrees instead.
+        ax.zaxis.set_rotate_label(False)
+        ax.set_zlabel("$P(r)$", rotation=90)
+        ax.set_xlim(r.min(), r.max())
+        ax.set_ylim(0, max(times))
+        ax.set_zlim(0, zmax * 1.15)
+        ax.view_init(elev=elev, azim=azim)
+        fig.tight_layout()
+        out_name = f"gaussian_fits_3d_ci{out_suffix}.png" if with_ci else f"gaussian_fits_3d{out_suffix}.png"
+        # bbox_inches="tight" rather than relying on tight_layout() alone --
+        # mplot3d's z-axis label position isn't accounted for by
+        # tight_layout()'s normal bounding-box logic and gets clipped
+        # otherwise.
+        fig.savefig(fits_path / out_name, dpi=600, bbox_inches="tight", pad_inches=0.25)
+        plt.close(fig)
+        print(f"  saved {out_name}")
+
+
+def plot_waterfall_surface3d(res_params, r, t, fits_path, mc_params, n_t_surf=60):
+    """Continuous 3D surface version of P(r, t) -- one smooth mesh over
+    (r, t), rather than plot_waterfall_3d's discrete stacked lines -- with
+    the 95% Monte Carlo CI overlaid as translucent gray surfaces above/below
+    a solid black LSQ surface. A wireframe CI was tried first but turned
+    into visual noise even heavily thinned out; solid translucent gray
+    reads as a clean "halo" around the black surface instead, and (being
+    monochrome) doesn't compete with the black surface for attention -- the
+    interesting structure (the bimodal transition breaking through around
+    t_off, the CI narrowing/widening across early vs. late time) stays
+    readable through the surface's own shape and the halo's thickness
+    rather than needing color to convey it.
+    Saves gaussian_fits_surface3d.png.
+    """
+    t_surf = np.linspace(0, np.max(t), n_t_surf)
+    R, T = np.meshgrid(r, t_surf, indexing="ij")
+    Z = double_gaussian(r, res_params, t_surf)  # (N_r, n_t_surf), vectorized over t
+
+    lo_grid = np.empty_like(Z)
+    hi_grid = np.empty_like(Z)
+    for j, ti in enumerate(t_surf):
+        mc_curves = _double_gaussian_mc(r, mc_params, ti)
+        lo_grid[:, j], hi_grid[:, j] = np.percentile(mc_curves, [2.5, 97.5], axis=1)
+
+    fig = plt.figure(figsize=(6, 5))
+    ax = fig.add_subplot(111, projection="3d")
+    ax.plot_surface(R, T, hi_grid, color="0.6", alpha=0.25, linewidth=0, antialiased=True)
+    ax.plot_surface(R, T, lo_grid, color="0.6", alpha=0.25, linewidth=0, antialiased=True)
+    ax.plot_surface(R, T, Z, color="black", alpha=0.85, linewidth=0, antialiased=True)
+
+    ax.set_xlabel("Distance $r$ (nm)")
+    ax.set_ylabel("Time (s)")
+    ax.zaxis.set_rotate_label(False)  # see plot_waterfall_3d's comment on the same fix
+    ax.set_zlabel("$P(r)$", rotation=90)
+    ax.set_xlim(r.min(), r.max())
+    ax.set_ylim(0, np.max(t_surf))
+    ax.set_zlim(0, float(hi_grid.max()) * 1.05)
+    ax.view_init(elev=22, azim=-60)
+    fig.tight_layout()
+    out_name = "gaussian_fits_surface3d.png"
+    fig.savefig(fits_path / out_name, dpi=600, bbox_inches="tight", pad_inches=0.25)
+    plt.close(fig)
+    print(f"  saved {out_name}")
 
 
 def double_gaussian(x, params, ti):  # noqa: ANN201 , ANN001
@@ -2853,7 +3196,10 @@ def main(
 # Section 6: Output plotting
 # =============================================================================
 
-def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, find_noise=False, subfolder=None):
+def plot_and_save(
+    res_params, broadened_file, intrinsic_file, pake_patterns, find_noise=False, subfolder=None,
+    plot_ci_bands=False, ci_bounds_file=None,
+):
     """Generate the standard set of diagnostic/summary figures for a given
     (already-fit) parameter set: data-vs-model images, a residual map, an
     example field-domain slice (both raw and windowed, showing what the
@@ -2865,6 +3211,16 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
     (data minus field-axis smooth) used for weighting the fit -- set this
     when you want to visually sanity-check the noise model, not just get
     the fit-quality plots.
+
+    plot_ci_bands=True additionally saves gaussian_fits_ci.png: the same
+    waterfall as gaussian_fits.png, but with each curve's flat area-fill
+    replaced by its own 95% Monte Carlo confidence band (still shaded in
+    that curve's time-color), built by sampling
+    A/tau_1/tau_2/beta/alpha/r0/w0/r1/w1 from the asymmetric-Gaussian CI
+    model in ci_bounds_file (a profile_ci_bounds.txt; see
+    _build_mc_param_samples) 10,000 times and taking the central 95% of the
+    resulting P(r) values at each r. gaussian_fits.png itself is always
+    produced, unchanged, either way.
     """
     broadened_data = enforce_increasing_x_axis(pd.read_feather(broadened_file))
     intrinsic_data = enforce_increasing_x_axis(pd.read_feather(intrinsic_file))
@@ -2894,6 +3250,7 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
     if subfolder:
         fits_path = fits_path / subfolder
     fits_path.mkdir(exist_ok=True, parents=True)
+    print(f"\nplot_and_save: writing figures to {fits_path}/")
 
     # --- raw data and best-fit model, as (field, time) images ---
     figr, axr = plt.subplots()
@@ -2927,6 +3284,7 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
     plt.close(figr)
     figf.savefig(fits_path.joinpath("fit_imshow.png"), dpi=600)
     plt.close(figf)
+    print("  saved raw_imshow.png, fit_imshow.png")
 
     residue = broadened_data_centered - out
 
@@ -2955,6 +3313,7 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
         cbar.set_label("Amplitude (arb. u)", rotation=270, labelpad=15)
         fig_res.savefig(fits_path.joinpath("noise_after_smoothing.png"), dpi=1200)
         plt.close(fig_res)
+        print("  saved noise_after_smoothing.png/.txt")
 
     fig_res, ax_res = plt.subplots()
     map_res = ax_res.imshow(
@@ -2970,6 +3329,7 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
     cbar.set_label("Amplitude (arb. u)", rotation=270, labelpad=15)
     fig_res.savefig(fits_path.joinpath("residue.png"), dpi=1200)
     plt.close(fig_res)
+    print("  saved residue.png")
 
     # --- example field-domain slice: SL, DL, and the fit at one early time point ---
     figl, axl = plt.subplots()
@@ -2993,6 +3353,7 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
     axl.set_ylabel("Amplitude (arb. u)")
     figl.savefig(fits_path.joinpath("slice.png"), dpi=1200)
     plt.close(figl)
+    print("  saved slice.png")
 
     # --- windowed slice: show what the optimizer actually sees (the same
     # super-Gaussian field window used inside fit_function) ---
@@ -3030,37 +3391,101 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
                 bbox_to_anchor=(0.98, 0.98), bbox_transform=ax_w.transAxes)
     fig_w.savefig(fits_path.joinpath("slice_windowed.png"), dpi=1200)
     plt.close(fig_w)
+    print("  saved slice_windowed.png")
 
     # --- P(r, t): the recovered distance-distribution waterfall + kinetics curve ---
+    # Always produces gaussian_fits.png (no CI shading). If plot_ci_bands is
+    # set, also produces gaussian_fits_ci.png -- same waterfall plus the gray
+    # Monte Carlo 95% band -- as a second, separate figure/file.
     fig_unfolded, ax_unfolded = plt.subplots()
-    figt, axt = plt.subplots(figsize=(3, 4))
     N = 8
     M = np.max(double_gaussian(r, res_params, t[0])) * 0.75
+    _VSCALE = 0.7  # compress each curve's own height (not the lane spacing M) for more gap between lanes
     cmap = plt.get_cmap("viridis")
     norm = mpl.colors.Normalize(vmin=0, vmax=np.max(t))  # type: ignore
-    cbar = plt.colorbar(
-        mappable=mpl.cm.ScalarMappable(norm=norm, cmap=cmap),  # type:ignore
-        ax=axt,
-    )  # type: ignore
-    cbar.ax.set_ylabel("Elapsed time (s)")
-    for ind, ti in enumerate(
-        (0, *np.arange(res_params["t_off"], np.max(t), np.max(t) // (N - 1))),
-    ):
-        axt.plot(
-            r,
-            double_gaussian(r, res_params, ti) + ind * M,
-            label=f"{ti:.1f}s",
-            c=cmap((ind - 1) / N),
-            zorder=2 * (N - ind) + 1,
+    _waterfall_times = (0, *np.arange(res_params["t_off"], np.max(t), np.max(t) // (N - 1)))
+
+    _waterfall_figs = [plt.subplots(figsize=(3, 4))]
+    if plot_ci_bands:
+        _waterfall_figs.append(plt.subplots(figsize=(3, 4)))
+        print(f"  building Monte Carlo CI bands from {ci_bounds_file} (10000 samples/param)...")
+        _mc_params = _build_mc_param_samples(res_params, ci_bounds_file, n_samples=10000, seed=0)
+        plot_param_ci_skew("r1", ci_bounds_file, fits_path)
+
+    for _fig_ind, (_fig, _ax) in enumerate(_waterfall_figs):
+        _with_ci = plot_ci_bands and _fig_ind == 1
+        cbar = plt.colorbar(
+            mappable=mpl.cm.ScalarMappable(norm=norm, cmap=cmap),  # type:ignore
+            ax=_ax,
+        )  # type: ignore
+        cbar.ax.set_ylabel("Elapsed time (s)")
+        for ind, ti in enumerate(_waterfall_times):
+            _color = cmap((ind - 1) / N)
+            _curve = _VSCALE * double_gaussian(r, res_params, ti) + ind * M
+            if _with_ci:
+                # CI figure: no flat area-fill down to baseline -- shade the
+                # Monte Carlo 95% band itself, in the same per-time color,
+                # instead.
+                _mc_curves = _double_gaussian_mc(r, _mc_params, ti)  # (N_r, n_samples)
+                _lo, _hi = np.percentile(_mc_curves, [2.5, 97.5], axis=1)
+                _lo, _hi = _VSCALE * _lo, _VSCALE * _hi
+                _ax.fill_between(
+                    r,
+                    _lo + ind * M,
+                    _hi + ind * M,
+                    facecolor=_color,
+                    alpha=0.4,
+                    linewidth=0,
+                    zorder=2 * (N - ind),
+                )
+            else:
+                _ax.fill_between(
+                    r,
+                    _curve,
+                    ind * M,
+                    facecolor=_color,
+                    alpha=0.5,
+                    zorder=2 * (N - ind),
+                )
+            _ax.plot(
+                r,
+                _curve,
+                label=f"{ti:.1f}s",
+                c=_color,
+                zorder=2 * (N - ind) + 1,
+            )
+        _ax.set_xlabel("Distance $r$ (nm)")
+        _ax.set_ylabel("$P(r)$")
+        _ax.set_yticklabels([])
+        _out_name = "gaussian_fits_ci.png" if _with_ci else "gaussian_fits.png"
+        _fig.savefig(fits_path.joinpath(_out_name), dpi=600)
+        plt.close(_fig)
+        print(f"  saved {_out_name}")
+
+    plot_waterfall_3d(
+        res_params, r, t, _waterfall_times, fits_path,
+        plot_ci_bands=plot_ci_bands, mc_params=_mc_params if plot_ci_bands else None,
+    )
+    # Same data/composition as the default view (distance still left-to-right,
+    # time still receding in depth) but the camera swung further around
+    # toward the low-r end (azim -60 -> -110) instead of the default's more
+    # oblique -60 vantage.
+    plot_waterfall_3d(
+        res_params, r, t, _waterfall_times, fits_path,
+        plot_ci_bands=plot_ci_bands, mc_params=_mc_params if plot_ci_bands else None,
+        azim=-110, out_suffix="_lowr",
+    )
+    if plot_ci_bands:
+        # Same -110 view, but tab10's discrete colors instead of a
+        # continuous gradient -- a check on whether categorically distinct
+        # colors make it easier to trace a band back to its own line than
+        # adjacent shades of winter do.
+        plot_waterfall_3d(
+            res_params, r, t, _waterfall_times, fits_path,
+            plot_ci_bands=True, mc_params=_mc_params, qualitative=True,
+            azim=-110, out_suffix="_cycled",
         )
-        axt.fill_between(
-            r,
-            double_gaussian(r, res_params, ti) + ind * M,
-            ind * M,
-            facecolor=cmap((ind - 1) / N),
-            alpha=0.5,
-            zorder=2 * (N - ind),
-        )
+        plot_waterfall_surface3d(res_params, r, t, fits_path, mc_params=_mc_params)
 
     ax_unfolded.plot(
         t,
@@ -3081,11 +3506,7 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
     ax_unfolded.set_xlabel("Time (s)")
     fig_unfolded.savefig(fits_path.joinpath("unfolded_ratio.png"), dpi=600)
     plt.close(fig_unfolded)
-    axt.set_xlabel("Distance $r$ (nm)")
-    axt.set_ylabel("$P(r)$")
-    axt.set_yticklabels([])
-    figt.savefig(fits_path.joinpath("gaussian_fits.png"), dpi=600)
-    plt.close(figt)
+    print("  saved unfolded_ratio.png")
 
     figtau, axtau = plt.subplots()
     axtau.plot(t, out[out.shape[0] // 2, :])
@@ -3094,6 +3515,7 @@ def plot_and_save(res_params, broadened_file, intrinsic_file, pake_patterns, fin
     axtau.set_ylabel("Peak height (au)")
     figtau.savefig(fits_path.joinpath("peak_heights.png"), dpi=600)
     plt.close(figtau)
+    print("  saved peak_heights.png")
 
     # --- interactive 3D surface of P(r, t), if plotly is available ---
     try:
@@ -3147,8 +3569,14 @@ if __name__ == "__main__":
     intrinsic_f = Path(basepath).joinpath(
         "intrinsic_linewidth/100mA_23.5kHz_pre30s_on10s_off230s_25000avgs_filtered_batchDecon.feather",
     )
-    # Kubo-Anderson FT kernel (accounts for motional narrowing) -- see
-    # dipolar_kernel_ft.py for how this file is generated.
+    # PLOT_CI_BANDS reads its CI table from next to broadened_f -- same
+    # fits/<OUTPUT_TAG>/ location do_profile_likelihood_matrix writes
+    # profile_ci_bounds.txt to (see the flag comment above), so this
+    # automatically tracks whichever dataset N414Q/sys.argv selected.
+    CI_BOUNDS_FILE = Path(broadened_f).parent / "fits"
+    if OUTPUT_TAG:
+        CI_BOUNDS_FILE = CI_BOUNDS_FILE / OUTPUT_TAG
+    CI_BOUNDS_FILE = CI_BOUNDS_FILE / "profile_ci_bounds.txt"
     # Run dipolar_kernel_ft.py first to generate this file (same default
     # parameters reproduce this exact filename/kernel).
     pake_patterns = Path(basepath).parent.parent.joinpath(
@@ -3170,7 +3598,7 @@ if __name__ == "__main__":
 
     _skip_fitting = (
         PROFILE_TAU or RUN_PROFILE_MATRIX or PROFILE_TOTAL_UNFOLDED
-        or REPLOT_PROFILE_MATRIX or REPLOT_TAU_PRIOR
+        or REPLOT_PROFILE_MATRIX or REPLOT_TAU_PRIOR or PLOT_CI_BANDS
     )
     if not _skip_fitting:
         if REFINE_FROM_SEED:
@@ -3264,4 +3692,7 @@ if __name__ == "__main__":
         if res_params is None:
             res_params = main(broadened_f, intrinsic_f, pake_patterns, output_subfolder=_lsq_sub, **_speedup)
         if res_params is not None:
-            plot_and_save(res_params, broadened_f, intrinsic_f, pake_patterns, find_noise=True, subfolder=_lsq_sub)
+            plot_and_save(
+                res_params, broadened_f, intrinsic_f, pake_patterns, find_noise=True, subfolder=_lsq_sub,
+                plot_ci_bands=PLOT_CI_BANDS, ci_bounds_file=CI_BOUNDS_FILE,
+            )
