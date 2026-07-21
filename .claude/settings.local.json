@@ -72,7 +72,15 @@
       "Bash(rm -rf /tmp/dipolar_test2)",
       "Bash(python3 -m py_compile pakeGlobalFit_v3.py)",
       "Bash(grep -n \"katoAsymmetric\" \"/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Manuscripts/2025-distances/supplementary.tex\")",
-      "Read(//Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Manuscripts/2025-distances/**)"
+      "Read(//Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Manuscripts/2025-distances/**)",
+      "Bash(find / -iname \"instructions.md\" -path \"*zotero*\")",
+      "Bash(find \"/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive\" -iname \"*zotero*\" -maxdepth 6 -type d 2>/dev/null | head -20)",
+      "Read(//Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/**)",
+      "Read(//Users/Brad/Library/CloudStorage/**)",
+      "Bash(find \"/Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Manuscripts\" -iname \"*zotero*\" 2>/dev/null)",
+      "Read(//Users/Brad/Library/CloudStorage/GoogleDrive-bradley.d.price@outlook.com/My Drive/Research/Manuscripts/**)",
+      "Read(//Users/Brad/Documents/**)",
+      "Bash(python3 /private/tmp/claude-501/-Users-Brad-Documents-Research-Code-python-rapidscan/a7982c79-bfdb-41c9-bc79-9ade064ad666/scratchpad/gen_real_3d_ci.py)"
     ],
     "additionalDirectories": [
       "/private/tmp/dipolar_test",

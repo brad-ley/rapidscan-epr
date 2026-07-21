@@ -74,6 +74,32 @@ confidence intervals.
   are manual composites of this script's own `raw_imshow.png` +
   `fit_imshow.png` outputs from the WT/N414Q runs; there is no single
   script that produces the composite directly.
+- Set `PLOT_CI_BANDS = True` to additionally propagate each parameter's
+  95% confidence interval (from `profile_ci_bounds.txt`) into a Monte
+  Carlo uncertainty band on the recovered P(r,t) distance distribution.
+  Each parameter's CI is modeled as an asymmetric ("split normal") Gaussian
+  solved so its own 2.5th/97.5th percentiles exactly reproduce the reported
+  CI bounds, sampled 10,000 times per parameter, and propagated through the
+  model independently (parameter correlations are not accounted for — see
+  the "Estimation of confidence intervals" section of the supplementary
+  material for the CI-band methodology and its limitations). Like
+  `REPLOT_PROFILE_MATRIX`, this is a replot-only flag: it
+  loads the already-saved LSQ result instead of running a new fit. Produces,
+  alongside the existing `gaussian_fits.png` waterfall:
+  - `gaussian_fits_ci.png` — the same 2D waterfall with each curve's flat
+    fill replaced by its own CI band.
+  - `gaussian_fits_3d.png` / `gaussian_fits_3d_ci.png` — a pseudo-3D
+    "stacked spectra" waterfall (distinct from the 2D version) with/without
+    the CI cloud, plus `_lowr` (camera panned toward the low-distance end)
+    and `_cycled` (tab10 discrete colors instead of the continuous
+    colormap, for comparison) variants of the CI version.
+  - `gaussian_fits_surface3d.png` — a continuous 3D surface version of
+    P(r,t), with the CI shown as a translucent gray halo around a solid
+    black surface.
+  - `<param>_ci_skew.png` (e.g. `r1_ci_skew.png`) — the fitted
+    asymmetric-Gaussian PDF for one parameter's CI, shown alongside its
+    reported bounds; this is the "Skew-asymmetric profile" figure in the
+    supplementary material.
 
 ### `dipolar_kernel_ft.py`
 Builds the dipolar-broadening kernel (Abragam Gaussian-Lorentzian bridging correlation function FT)
